@@ -77,23 +77,6 @@
       // Load orders with pagination
       await loadOrders();
 
-      // Check Amazon API health
-      try {
-        const healthResponse = await fetch('/api/health');
-        const healthResult = await healthResponse.json();
-        
-        if (healthResult.success && healthResult.data.amazonApi) {
-          const amazonApi = healthResult.data.amazonApi;
-          if (!amazonApi.configured) {
-            error = 'Amazon API is not configured. Please set up your API credentials.';
-          } else if (!amazonApi.initialized) {
-            error = `Amazon API initialization failed: ${amazonApi.error}`;
-          }
-        }
-      } catch (healthErr: any) {
-        console.warn('Health check failed:', healthErr.message);
-      }
-
     } catch (err: any) {
       error = err.message || 'An error occurred';
     } finally {
@@ -173,7 +156,7 @@
   async function syncOrders() {
     try {
       syncLoading = true;
-      const response = await fetch('/api/automation/sync-orders', {
+      const response = await fetch('/api/orders/sync', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -369,24 +352,6 @@
                  {syncLoading ? 'Syncing...' : 'Sync Orders'}
                </button>
              </div>
-             
-             {#if error && (error.includes('Amazon API') || error.includes('configured'))}
-               <div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                 <div class="flex">
-                   <div class="flex-shrink-0">
-                     <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                       <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-                     </svg>
-                   </div>
-                   <div class="ml-3">
-                     <h3 class="text-sm font-medium text-yellow-800">Setup Required</h3>
-                     <p class="text-sm text-yellow-700 mt-1">
-                       Amazon API credentials are not configured. See <a href="/AMAZON_API_SETUP.md" class="underline font-medium">setup guide</a> for instructions.
-                     </p>
-                   </div>
-                 </div>
-               </div>
-             {/if}
            </div>
         </div>
       {/if}

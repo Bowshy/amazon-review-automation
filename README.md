@@ -212,7 +212,7 @@ Visit `http://localhost:5173` to see the application.
 
 - `POST /api/automation/run-daily`: Trigger daily automation
 - `POST /api/automation/retry-failed`: Retry failed review requests
-- `POST /api/automation/sync-orders`: Sync orders from Amazon
+- `POST /api/orders/sync`: Sync orders from Amazon
 
 ### Data Endpoints
 
