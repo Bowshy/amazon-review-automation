@@ -396,7 +396,7 @@ export class AmazonSPAPI {
   }
 
   // Create Product Review and Seller Feedback Solicitation using the SDK - Updated with proper parameters
-  async createReviewSolicitation(orderId: string): Promise<CreateProductReviewAndSellerFeedbackSolicitationResponse> {
+  async createReviewSolicitation(orderId: string): Promise<CreateProductReviewAndSellerFeedbackSolicitationResponse | { notEligible: true; reason: string }> {
     const startTime = Date.now();
     
     try {
@@ -415,7 +415,25 @@ export class AmazonSPAPI {
       );
 
       if (!hasProductReviewAction) {
-        throw new Error('Product review solicitation is not available for this order');
+        const duration = Date.now() - startTime;
+        const reason = 'Product review solicitation is not available for this order';
+        
+        logger.info('Amazon API call: createReviewSolicitation - not eligible', {
+          aws: {
+            operation: 'createReviewSolicitation',
+            success: false,
+            reason: 'not_eligible'
+          },
+          event: {
+            duration
+          },
+          orderId,
+          marketplaceId: this.config.marketplaceId,
+          reason,
+          actionCount: solicitationActions.actions?.length || 0
+        });
+        
+        return { notEligible: true, reason };
       }
 
       const response = await this.client.callAPI({

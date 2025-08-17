@@ -285,8 +285,12 @@ export class AmazonService {
             });
 
             sent++;
+          } else if (result.notEligible) {
+            // Handle not eligible case - mark as skipped, not failed
+            await this.markOrderAsSkipped(order.id, result.error ?? 'No solicitation actions available');
+            skipped++;
           } else {
-            // Handle failure
+            // Handle actual failure
             await this.handleReviewRequestFailure(order, result.error ?? 'Unknown error');
             failed++;
           }
@@ -381,8 +385,15 @@ export class AmazonService {
               ]);
               
               successCount++;
+            } else if (result.notEligible) {
+              // Handle not eligible case - mark as skipped, not failed
+              await this.db.updateReviewRequest(request.id, {
+                status: ReviewRequestStatus.SKIPPED,
+                errorMessage: result.error,
+                retryCount: request.retryCount + 1
+              });
             } else {
-              // Update retry count and status
+              // Update retry count and status for actual failures
               await this.db.updateReviewRequest(request.id, {
                 status: ReviewRequestStatus.FAILED,
                 errorMessage: result.error,
@@ -451,7 +462,7 @@ export class AmazonService {
   /**
    * Send review request via Amazon API
    */
-  private async sendReviewRequest(order: LegacyAmazonOrder): Promise<{ success: boolean; error?: string }> {
+  private async sendReviewRequest(order: LegacyAmazonOrder): Promise<{ success: boolean; error?: string; notEligible?: boolean }> {
     try {
       // Initialize API and send review request
       const api = await this.initializeApi();
@@ -460,8 +471,14 @@ export class AmazonService {
       
       const result = await api.createReviewSolicitation(order.amazonOrderId);
       
-      // Check for errors in the response
-      if (result.errors && result.errors.length > 0) {
+      // Check if the order is not eligible for review requests
+      if ('notEligible' in result && result.notEligible) {
+        console.log(`Order ${order.amazonOrderId} is not eligible for review requests: ${result.reason}`);
+        return { success: false, notEligible: true, error: result.reason };
+      }
+      
+      // Check for errors in the response (only if it's a regular response, not notEligible)
+      if ('errors' in result && result.errors && result.errors.length > 0) {
         const firstError = result.errors[0];
         const errorMessage = firstError.message;
         console.error(`Review solicitation failed for order ${order.amazonOrderId}:`, errorMessage);
