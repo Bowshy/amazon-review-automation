@@ -6,10 +6,10 @@ export function getDatabaseUrl(): string {
   
   if (isSupabase) {
     // Supabase connection with PgBouncer compatibility
-    return `postgresql://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?schema=public&pgbouncer=true&connection_limit=10&pool_timeout=20&statement_timeout=30000&idle_in_transaction_session_timeout=30000&application_name=amazon-review-automation`;
+    return `postgresql://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?schema=public&pgbouncer=true&connection_limit=30&pool_timeout=20&statement_timeout=30000&idle_in_transaction_session_timeout=30000&application_name=amazon-review-automation`;
   } else {
     // Standard PostgreSQL connection
-    return `postgresql://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?schema=public&connection_limit=10&pool_timeout=20&statement_timeout=30000&idle_in_transaction_session_timeout=30000&application_name=amazon-review-automation`;
+    return `postgresql://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?schema=public&connection_limit=30&pool_timeout=20&statement_timeout=30000&idle_in_transaction_session_timeout=30000&application_name=amazon-review-automation`;
   }
 }
 

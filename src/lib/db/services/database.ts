@@ -488,7 +488,7 @@ export class DatabaseService {
       });
 
       // Process with limited concurrency to avoid DB connection issues
-      const limit = pLimit(5); // Limit to 5 concurrent operations
+      const limit = pLimit(7); // Limit to 5 concurrent operations
       
       const updatePromises = updates.map(({ id, updates: orderUpdates }) => 
         limit(async () => {

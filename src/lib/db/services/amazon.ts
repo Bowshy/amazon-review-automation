@@ -127,7 +127,7 @@ export class AmazonService {
       let totalProcessed = 0;
 
       // Process orders with limited concurrency to avoid DB connection issues
-      const limit = pLimit(5); // Limit to 5 concurrent operations
+      const limit = pLimit(7); // Limit to 5 concurrent operations
       
       // Use the async generator to fetch all orders
       for await (const ordersBatch of this.fetchAllOrders(startDate)) {
@@ -343,7 +343,7 @@ export class AmazonService {
       let successCount = 0;
 
       // Process with limited concurrency to avoid DB connection issues
-      const limit = pLimit(3); // Limit to 3 concurrent operations for API calls
+      const limit = pLimit(7); // Limit to 3 concurrent operations for API calls
       
       const retryPromises = retryableRequests.map((request) => 
         limit(async () => {
