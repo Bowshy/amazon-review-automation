@@ -1,13 +1,7 @@
 import winston from 'winston';
 import { ecsFormat } from '@elastic/ecs-winston-format';
-import path from 'path';
-import fs from 'fs';
 
-// Ensure logs directory exists
-const logsDir = path.join(process.cwd(), 'logs');
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
-}
+const isProduction = process.env.NODE_ENV === 'production';
 
 // Custom format for console output (keeping the existing format for development)
 const consoleFormat = winston.format.combine(
@@ -22,9 +16,9 @@ const consoleFormat = winston.format.combine(
   })
 );
 
-// Create the main logger with ECS format
+// Create the main logger with ECS format. In production, we log ECS to stdout.
 const logger = winston.createLogger({
-  level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+  level: isProduction ? 'info' : 'debug',
   format: ecsFormat({
     // Enable error conversion to ECS error fields
     convertErr: true,
@@ -41,44 +35,18 @@ const logger = winston.createLogger({
     eventDataset: 'amazon-review-automation'
   }),
   transports: [
-    // Console transport for development
+    // Console transport only. In dev, pretty print; in prod, inherit ECS JSON from logger.format
     new winston.transports.Console({
-      format: consoleFormat,
-      level: process.env.NODE_ENV === 'production' ? 'warn' : 'debug'
-    }),
-    
-    // File transport for all logs with ECS format
-    new winston.transports.File({
-      filename: path.join(logsDir, 'app.log'),
-      maxsize: 5242880, // 5MB
-      maxFiles: 5,
-      tailable: true
-    }),
-    
-    // Separate file for errors only with ECS format
-    new winston.transports.File({
-      filename: path.join(logsDir, 'error.log'),
-      level: 'error',
-      maxsize: 5242880, // 5MB
-      maxFiles: 5,
-      tailable: true
+      level: isProduction ? 'info' : 'debug',
+      ...(isProduction ? {} : { format: consoleFormat })
     })
   ],
-  // Handle uncaught exceptions
+  // Handle uncaught exceptions and rejections to console as well
   exceptionHandlers: [
-    new winston.transports.File({
-      filename: path.join(logsDir, 'exceptions.log'),
-      maxsize: 5242880, // 5MB
-      maxFiles: 5
-    })
+    new winston.transports.Console({ ...(isProduction ? {} : { format: consoleFormat }) })
   ],
-  // Handle unhandled promise rejections
   rejectionHandlers: [
-    new winston.transports.File({
-      filename: path.join(logsDir, 'rejections.log'),
-      maxsize: 5242880, // 5MB
-      maxFiles: 5
-    })
+    new winston.transports.Console({ ...(isProduction ? {} : { format: consoleFormat }) })
   ]
 });
 
