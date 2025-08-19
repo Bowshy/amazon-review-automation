@@ -151,7 +151,7 @@ Visit `http://localhost:5173` to see the application.
 
 ### Review Request Logic
 
-- **Timing**: Exactly 25 days after delivery (within Amazon's 5-30 day window)
+- **Timing**: Exactly 25 days after delivery (within Amazon's 5-30 day window) 
 - **Eligibility**: Only for delivered, non-returned orders
 - **Frequency**: One request per order maximum
 - **Retry Logic**: Up to 3 retry attempts for failed requests
