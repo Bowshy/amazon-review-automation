@@ -742,7 +742,7 @@ export class AmazonService {
    */
   private convertAmazonOrderToLegacy(amazonOrder: AmazonOrder): LegacyAmazonOrder {
     // Extract delivery date from latest or earliest delivery date
-    const deliveryDate = amazonOrder.LatestDeliveryDate || amazonOrder.EarliestDeliveryDate || null;
+    const deliveryDate = amazonOrder.LatestShipDate || amazonOrder.EarliestShipDate || null;
 
     // Extract buyer info
     const buyerEmail = amazonOrder.BuyerInfo?.BuyerEmail || '';
