@@ -115,11 +115,6 @@ export class DatabaseService {
     const where: any = {};
 
     // Apply filters with proper query optimization
-    if (filters.dateFrom || filters.dateTo) {
-      where.deliveryDate = {};
-      if (filters.dateFrom) where.deliveryDate.gte = new Date(filters.dateFrom);
-      if (filters.dateTo) where.deliveryDate.lte = new Date(filters.dateTo);
-    }
     if (filters.status && filters.status.length > 0) {
       where.orderStatus = { in: filters.status };
     }
@@ -132,12 +127,8 @@ export class DatabaseService {
     if (filters.reviewRequestStatus && filters.reviewRequestStatus.length > 0) {
       where.reviewRequestStatus = { in: filters.reviewRequestStatus };
     }
-    if (filters.search) {
-      where.OR = [
-        { amazonOrderId: { contains: filters.search, mode: 'insensitive' } },
-        { 'buyerInfo.name': { contains: filters.search, mode: 'insensitive' } },
-        { 'buyerInfo.email': { contains: filters.search, mode: 'insensitive' } }
-      ];
+    if (filters.orderId) {
+      where.amazonOrderId = { contains: filters.orderId, mode: 'insensitive' };
     }
 
     const skip = (pagination.page - 1) * pagination.limit;
@@ -329,6 +320,77 @@ export class DatabaseService {
     }, 3, 'create review request');
   }
 
+  /**
+   * Update order and create review request in a single transaction
+   * This ensures data consistency between both operations
+   */
+  async updateOrderAndCreateReviewRequest(
+    orderId: string, 
+    orderUpdates: Partial<LegacyAmazonOrder>,
+    reviewRequest: Omit<LegacyReviewRequest, 'id' | 'createdAt' | 'updatedAt'>
+  ): Promise<{
+    updatedOrder: LegacyAmazonOrder;
+    reviewRequest: LegacyReviewRequest;
+  }> {
+    return await this.executeWithRetry(async () => {
+      const client = await databaseManager.getClient();
+      return await client.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>) => {
+        // Step 1: Update the order
+        const updateData: any = {};
+        
+        if (orderUpdates.reviewRequestSent !== undefined) updateData.reviewRequestSent = orderUpdates.reviewRequestSent;
+        if (orderUpdates.reviewRequestDate !== undefined) updateData.reviewRequestDate = orderUpdates.reviewRequestDate ? new Date(orderUpdates.reviewRequestDate) : null;
+        if (orderUpdates.reviewRequestStatus !== undefined) updateData.reviewRequestStatus = orderUpdates.reviewRequestStatus;
+        if (orderUpdates.reviewRequestError !== undefined) updateData.reviewRequestError = orderUpdates.reviewRequestError;
+        if (orderUpdates.isReturned !== undefined) updateData.isReturned = orderUpdates.isReturned;
+        if (orderUpdates.returnDate !== undefined) updateData.returnDate = orderUpdates.returnDate ? new Date(orderUpdates.returnDate) : null;
+        if (orderUpdates.orderStatus !== undefined) updateData.orderStatus = orderUpdates.orderStatus;
+        if (orderUpdates.orderTotal !== undefined) updateData.orderTotal = orderUpdates.orderTotal;
+        if (orderUpdates.buyerInfo !== undefined) updateData.buyerInfo = orderUpdates.buyerInfo;
+        if (orderUpdates.marketplaceId !== undefined) updateData.marketplaceId = orderUpdates.marketplaceId;
+        if (orderUpdates.purchaseDate !== undefined) updateData.purchaseDate = orderUpdates.purchaseDate ? new Date(orderUpdates.purchaseDate) : null;
+        if (orderUpdates.deliveryDate !== undefined) updateData.deliveryDate = orderUpdates.deliveryDate ? new Date(orderUpdates.deliveryDate) : null;
+        if (orderUpdates.items !== undefined) updateData.items = orderUpdates.items;
+
+        const updatedOrder = await tx.amazonOrder.update({
+          where: { id: orderId },
+          data: updateData
+        });
+
+        // Step 2: Create the review request
+        const dbRequest = await tx.reviewRequest.create({
+          data: {
+            orderId: reviewRequest.orderId,
+            amazonOrderId: reviewRequest.amazonOrderId,
+            status: reviewRequest.status,
+            sentAt: reviewRequest.sentAt ? new Date(reviewRequest.sentAt) : null,
+            errorMessage: reviewRequest.errorMessage,
+            retryCount: reviewRequest.retryCount || 0
+          }
+        });
+
+        // Step 3: Log activity for audit trail
+        await tx.activityLog.create({
+          data: {
+            action: 'review_request_triggered',
+            details: { 
+              requestId: dbRequest.id,
+              orderId: reviewRequest.orderId,
+              status: reviewRequest.status,
+              orderUpdates: Object.keys(updateData)
+            },
+            orderId: reviewRequest.orderId
+          }
+        });
+
+        return {
+          updatedOrder: this.mapOrderFromDb(updatedOrder),
+          reviewRequest: this.mapReviewRequestFromDb(dbRequest)
+        };
+      });
+    }, 3, 'update order and create review request');
+  }
+
   async updateReviewRequest(id: string, updates: Partial<LegacyReviewRequest>): Promise<LegacyReviewRequest> {
     return await this.executeWithRetry(async () => {
       const client = await databaseManager.getClient();
@@ -386,16 +448,33 @@ export class DatabaseService {
       // Use parallel queries for better performance
       const [
         totalOrders,
-        eligibleForReview,
         reviewRequestsSent,
         reviewRequestsFailed,
         reviewRequestsSkipped,
         returnedOrders,
-        todayRequests,
-        thisWeekRequests,
-        thisMonthRequests
+        eligibleForReview,
+        ineligibleForReview
       ] = await Promise.all([
         client.amazonOrder.count(),
+        client.amazonOrder.count({ 
+          where: { 
+            reviewRequestSent: true,
+            reviewRequestStatus: 'SENT'
+          } 
+        }),
+        client.amazonOrder.count({ 
+          where: { 
+            reviewRequestSent: true,
+            reviewRequestStatus: 'FAILED'
+          } 
+        }),
+        client.amazonOrder.count({ 
+          where: { 
+            reviewRequestSent: true,
+            reviewRequestStatus: 'SKIPPED'
+          } 
+        }),
+        client.amazonOrder.count({ where: { isReturned: true } }),
         client.amazonOrder.count({
           where: {
             isReturned: false,
@@ -404,20 +483,19 @@ export class DatabaseService {
             orderStatus: { in: ['Shipped', 'PartiallyShipped'] }
           }
         }),
-        client.reviewRequest.count({ where: { status: 'SENT' } }),
-        client.reviewRequest.count({ where: { status: 'FAILED' } }),
-        client.reviewRequest.count({ where: { status: 'SKIPPED' } }),
-        client.amazonOrder.count({ where: { isReturned: true } }),
-        client.reviewRequest.count({
-          where: { createdAt: { gte: new Date(format(new Date(), 'yyyy-MM-dd')) } }
-        }),
-        client.reviewRequest.count({
-          where: { createdAt: { gte: addDays(new Date(), -7) } }
-        }),
-        client.reviewRequest.count({
-          where: { createdAt: { gte: addDays(new Date(), -30) } }
+        client.amazonOrder.count({
+          where: {
+            OR: [
+              { isReturned: true },
+              { orderStatus: { notIn: ['Shipped', 'PartiallyShipped'] } },
+              { deliveryDate: { gt: addDays(new Date(), -25) } }
+            ]
+          }
         })
       ]);
+
+      // Calculate pending review requests (eligible but not yet processed)
+      const pendingReviewRequests = eligibleForReview;
 
       return {
         totalOrders,
@@ -426,9 +504,8 @@ export class DatabaseService {
         reviewRequestsFailed,
         reviewRequestsSkipped,
         returnedOrders,
-        todayRequests,
-        thisWeekRequests,
-        thisMonthRequests
+        pendingReviewRequests,
+        ineligibleForReview
       };
     }, 3, 'get dashboard stats');
   }

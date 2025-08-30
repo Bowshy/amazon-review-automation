@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { format } from 'date-fns';
+  import type { DataTableColumn, DataTableAction, PaginationInfo } from './DataTable.types';
 
   export let data: any[] = [];
   export let columns: DataTableColumn[] = [];
@@ -16,22 +17,6 @@
   export let sortOrder: 'asc' | 'desc' = 'desc';
 
   const dispatch = createEventDispatcher();
-
-  export interface DataTableColumn {
-    key: string;
-    label: string;
-    sortable?: boolean;
-    width?: string;
-    render?: (value: any, row: any) => string;
-    align?: 'left' | 'center' | 'right';
-  }
-
-  export interface PaginationInfo {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-  }
 
   function handleSort(column: DataTableColumn) {
     if (!column.sortable || loading) return;
@@ -176,9 +161,37 @@
             <tr class="hover:bg-blue-50 transition-colors duration-150 {index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}">
               {#each columns as column}
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 {column.align === 'center' ? 'text-center' : column.align === 'right' ? 'text-right' : 'text-left'} border-b border-gray-100">
-                  <div class="flex items-center">
-                    {@html formatValue(row[column.key], column, row)}
-                  </div>
+                  {#if column.actions}
+                    <div class="flex items-center space-x-2">
+                      {#each column.actions(row) as action}
+                        <button
+                          on:click={() => action.onClick(row)}
+                          disabled={action.disabled || loading}
+                          class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed {
+                            action.variant === 'primary' ? 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500' :
+                            action.variant === 'secondary' ? 'bg-gray-600 text-white hover:bg-gray-700 focus:ring-gray-500' :
+                            action.variant === 'danger' ? 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500' :
+                            action.variant === 'success' ? 'bg-green-600 text-white hover:bg-green-700 focus:ring-green-500' :
+                            'bg-gray-200 text-gray-700 hover:bg-gray-300 focus:ring-gray-500'
+                          }"
+                        >
+                          {#if action.disabled && action.label !== 'Not Available' && action.label !== 'Already Sent'}
+                            <svg class="animate-spin -ml-1 mr-1 h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                          {:else if action.icon}
+                            <span class="mr-1">{action.icon}</span>
+                          {/if}
+                          {action.label}
+                        </button>
+                      {/each}
+                    </div>
+                  {:else}
+                    <div class="flex items-center">
+                      {@html formatValue(row[column.key], column, row)}
+                    </div>
+                  {/if}
                 </td>
               {/each}
             </tr>

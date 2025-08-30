@@ -386,7 +386,7 @@ export class AmazonService {
       const createReportResponse = await api.createReturnsReport(
         dataStartTime.toISOString(),
         dataEndTime.toISOString()
-      );
+      ) as { reportId: string };
       
       const reportId = createReportResponse.reportId;
       if (!reportId) {
@@ -444,7 +444,7 @@ export class AmazonService {
                      // Update order with return information (simplified - just mark as returned)
            await this.db.updateOrder(order.id, {
              isReturned: true,
-             returnDate: returnDate ? new Date(returnDate) : null
+             returnDate: returnDate ? new Date(returnDate).toISOString() : undefined
            });
 
           updatedOrders++;
@@ -807,5 +807,200 @@ export class AmazonService {
     }
   }
 
+  /**
+   * Check solicitation actions for a specific order
+   */
+  async checkSolicitationActions(orderId: string): Promise<{
+    hasActions: boolean;
+    actions?: string[];
+    error?: string;
+  }> {
+    try {
+      logger.info('Checking solicitation actions for order', { orderId });
+      
+      const api = await this.initializeApi();
+      const response = await api.getSolicitationActions(orderId);
+      
+      if (response.errors && response.errors.length > 0) {
+        const errorMessage = response.errors[0].message;
+        logger.error('Solicitation actions check failed', {
+          orderId,
+          error: errorMessage
+        });
+        return {
+          hasActions: false,
+          error: errorMessage
+        };
+      }
+      
+      const actions = response.actions?.map(action => action.name) || [];
+      const hasActions = actions.length > 0;
+      
+      logger.info('Solicitation actions check completed', {
+        orderId,
+        hasActions,
+        actionCount: actions.length,
+        actions
+      });
+      
+      return {
+        hasActions,
+        actions
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Solicitation actions check failed', {
+        orderId,
+        error: errorMessage
+      });
+      
+      return {
+        hasActions: false,
+        error: errorMessage
+      };
+    }
+  }
+
+  /**
+   * Trigger a review request for a specific order
+   */
+  async triggerReviewRequest(amazonOrderId: string): Promise<{
+    success: boolean;
+    status: string;
+    error?: string;
+  }> {
+    try {
+      logger.info('Triggering review request for order', { amazonOrderId });
+      
+      const api = await this.initializeApi();
+      const result = await api.createReviewSolicitation(amazonOrderId);
+      
+      if ('notEligible' in result && result.notEligible) {
+        logger.info('Order not eligible for review request', {
+          amazonOrderId,
+          reason: result.reason
+        });
+        
+        return {
+          success: false,
+          status: 'NOT_ELIGIBLE',
+          error: result.reason
+        };
+      }
+      
+      // Check for errors in the response
+      if ('errors' in result && result.errors && result.errors.length > 0) {
+        const errorMessage = result.errors[0].message;
+        logger.error('Review request creation failed', {
+          amazonOrderId,
+          error: errorMessage
+        });
+        
+        return {
+          success: false,
+          status: 'FAILED',
+          error: errorMessage
+        };
+      }
+      
+      // Verify that the solicitation was actually created by checking actions again
+      logger.info('Verifying solicitation was created by checking actions again', { amazonOrderId });
+      const verificationActions = await api.getSolicitationActions(amazonOrderId);
+      
+      if (verificationActions.errors && verificationActions.errors.length > 0) {
+        logger.error('Failed to verify solicitation creation', {
+          amazonOrderId,
+          error: verificationActions.errors[0].message
+        });
+        return {
+          success: false,
+          status: 'FAILED',
+          error: 'Failed to verify solicitation creation'
+        };
+      }
+      
+      // Check if the order is still eligible (which would indicate the solicitation wasn't created)
+      const stillHasActions = verificationActions.actions?.some(
+        action => action.name === 'productReviewAndSellerFeedback'
+      );
+      
+      if (stillHasActions) {
+        logger.error('Solicitation was not created - order still has actions available', {
+          amazonOrderId,
+          availableActions: verificationActions.actions?.map(action => action.name) || []
+        });
+        return {
+          success: false,
+          status: 'FAILED',
+          error: 'Solicitation was not created - order still eligible for review request'
+        };
+      }
+      
+      logger.info('Solicitation creation verified - order no longer has actions available', { amazonOrderId });
+      
+      // First, find the order by amazonOrderId to get the database UUID
+      const order = await this.db.getOrderByAmazonOrderId(amazonOrderId);
+      if (!order) {
+        logger.error('Order not found in database', { amazonOrderId });
+        return {
+          success: false,
+          status: 'FAILED',
+          error: 'Order not found in database'
+        };
+      }
+      
+      logger.info('Found order in database', { 
+        amazonOrderId,
+        orderId: order.id,
+        currentReviewStatus: order.reviewRequestSent
+      });
+      
+      // Update order and create review request in a single transaction
+      logger.info('Updating order and creating review request in transaction...', { orderId: order.id });
+      const dbResult = await this.db.updateOrderAndCreateReviewRequest(
+        order.id,
+        {
+          reviewRequestSent: true,
+          reviewRequestDate: new Date().toISOString(),
+          reviewRequestStatus: 'SENT'
+        },
+        {
+          orderId: order.id, // Use the database UUID, not amazonOrderId
+          amazonOrderId: amazonOrderId,
+          status: 'SENT',
+          sentAt: new Date().toISOString(),
+          retryCount: 0
+        }
+      );
+      
+      logger.info('Transaction completed successfully', { 
+        orderId: order.id,
+        newReviewStatus: dbResult.updatedOrder.reviewRequestSent,
+        reviewRequestId: dbResult.reviewRequest.id
+      });
+      
+      logger.info('Review request created successfully', { 
+        amazonOrderId,
+        orderId: order.id 
+      });
+      
+      return {
+        success: true,
+        status: 'SENT'
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Review request trigger failed', {
+        amazonOrderId,
+        error: errorMessage
+      });
+      
+      return {
+        success: false,
+        status: 'FAILED',
+        error: errorMessage
+      };
+    }
+  }
 
 }

@@ -458,7 +458,12 @@ export class AmazonSPAPI {
       });
 
       const duration = Date.now() - startTime;
-      const actionCount = response.actions?.length || 0;
+      
+      // Handle the response structure properly
+      // Actions can be in either _embedded.actions or directly in actions (legacy)
+      const responseData = response as any;
+      const actions = responseData._embedded?.actions || responseData.actions || [];
+      const actionCount = actions.length;
       
       logger.info('Amazon API call: getSolicitationActions', {
         aws: {
@@ -471,10 +476,15 @@ export class AmazonSPAPI {
         orderId,
         actionCount,
         hasErrors: !!response.errors,
-        marketplaceId: this.config.marketplaceId
+        marketplaceId: this.config.marketplaceId,
+        availableActions: actions.map((action: any) => action.name)
       });
 
-      return response as GetSolicitationActionsForOrderResponse;
+      // Return response with normalized actions structure
+      return {
+        ...response,
+        actions: actions // Ensure actions are always available at the top level
+      } as GetSolicitationActionsForOrderResponse;
     } catch (error) {
       const duration = Date.now() - startTime;
       logger.error('Amazon API call: getSolicitationActions', {
@@ -507,9 +517,16 @@ export class AmazonSPAPI {
         throw new Error(`Solicitation actions check failed: ${solicitationActions.errors[0].message}`);
       }
 
-      // Check if ProductReview action is available
+      // Log available actions for debugging
+      logger.info('Available solicitation actions', {
+        orderId,
+        availableActions: solicitationActions.actions?.map(action => action.name) || [],
+        actionCount: solicitationActions.actions?.length || 0
+      });
+
+      // Check if productReviewAndSellerFeedback action is available
       const hasProductReviewAction = solicitationActions.actions?.some(
-        action => action.name === 'ProductReview'
+        action => action.name === 'productReviewAndSellerFeedback'
       );
 
       if (!hasProductReviewAction) {
@@ -538,18 +555,19 @@ export class AmazonSPAPI {
         operation: 'createProductReviewAndSellerFeedbackSolicitation',
         endpoint: 'solicitations',
         path: {
-          amazonOrderId: orderId
+          amazonOrderId: orderId,
+          solicitationType: 'productReviewAndSellerFeedback'
         },
         query: {
           marketplaceIds: [this.config.marketplaceId]
-        },
-        body: {
-          // The body can be empty for this operation as per Amazon SP-API documentation
         }
+        // No body is required for this operation as per Amazon SP-API documentation
       });
 
       const duration = Date.now() - startTime;
-      logger.info('Amazon API call: createReviewSolicitation', {
+      
+      // Log the response for debugging
+      logger.info('Amazon API call: createReviewSolicitation - response received', {
         aws: {
           operation: 'createReviewSolicitation',
           success: true
@@ -558,10 +576,41 @@ export class AmazonSPAPI {
           duration
         },
         orderId,
-        marketplaceId: this.config.marketplaceId
+        marketplaceId: this.config.marketplaceId,
+        responseStatus: response.status || 'unknown',
+        responseData: response
       });
       
-      return response as CreateProductReviewAndSellerFeedbackSolicitationResponse;
+      // According to Amazon SP-API documentation, successful response returns 201 status
+      // Check if the response indicates success
+      if (response && (response.status === 201 || Object.keys(response).length === 0)) {
+        logger.info('Amazon API call: createReviewSolicitation - success confirmed', {
+          orderId,
+          marketplaceId: this.config.marketplaceId,
+          responseStatus: response.status || 'empty_response'
+        });
+        return response as CreateProductReviewAndSellerFeedbackSolicitationResponse;
+      } else {
+        // If response has errors, handle them
+        if (response && response.errors && response.errors.length > 0) {
+          const errorMessage = response.errors[0].message;
+          logger.error('Amazon API call: createReviewSolicitation - API returned errors', {
+            orderId,
+            marketplaceId: this.config.marketplaceId,
+            errors: response.errors
+          });
+          throw new Error(`API returned errors: ${errorMessage}`);
+        }
+        
+        // If we get here, something unexpected happened
+        logger.warn('Amazon API call: createReviewSolicitation - unexpected response', {
+          orderId,
+          marketplaceId: this.config.marketplaceId,
+          response,
+          responseStatus: response?.status || 'unknown'
+        });
+        return response as CreateProductReviewAndSellerFeedbackSolicitationResponse;
+      }
     } catch (error) {
       const duration = Date.now() - startTime;
       logger.error('Amazon API call: createReviewSolicitation', {

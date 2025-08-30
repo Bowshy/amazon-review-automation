@@ -7,11 +7,9 @@
 
   const dispatch = createEventDispatcher();
 
-  let searchTerm = filters.search || '';
+  let orderIdFilter = filters.orderId || '';
   let statusFilter = filters.status || [];
   let reviewStatusFilter = filters.reviewRequestStatus || [];
-  let dateFrom = filters.dateFrom || '';
-  let dateTo = filters.dateTo || '';
   let isReturned = filters.isReturned;
 
   const orderStatuses = [
@@ -34,11 +32,9 @@
     if (loading) return;
     
     const newFilters: Record<string, any> = {
-      search: searchTerm.trim() || undefined,
+      orderId: orderIdFilter.trim() || undefined,
       status: statusFilter.length > 0 ? statusFilter : undefined,
       reviewRequestStatus: reviewStatusFilter.length > 0 ? reviewStatusFilter : undefined,
-      dateFrom: dateFrom || undefined,
-      dateTo: dateTo || undefined,
       isReturned: isReturned
     };
 
@@ -55,11 +51,9 @@
   function clearFilters() {
     if (loading) return;
     
-    searchTerm = '';
+    orderIdFilter = '';
     statusFilter = [];
     reviewStatusFilter = [];
-    dateFrom = '';
-    dateTo = '';
     isReturned = undefined;
     
     dispatch('filterChange', { filters: {} });
@@ -87,38 +81,15 @@
 </script>
 
 <div class="bg-white rounded-lg shadow-lg border border-gray-200 p-6 mb-6">
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-    <!-- Search -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <!-- Order ID Filter -->
     <div>
-      <label for="search" class="block text-sm font-semibold text-gray-700 mb-2">Search</label>
+      <label for="orderId" class="block text-sm font-semibold text-gray-700 mb-2">Order ID</label>
       <input
-        id="search"
+        id="orderId"
         type="text"
-        bind:value={searchTerm}
-        placeholder="Search orders..."
-        disabled={loading}
-        class="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-50"
-      />
-    </div>
-
-    <!-- Date Range -->
-    <div>
-      <label for="dateFrom" class="block text-sm font-semibold text-gray-700 mb-2">From Date</label>
-      <input
-        id="dateFrom"
-        type="date"
-        bind:value={dateFrom}
-        disabled={loading}
-        class="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-50"
-      />
-    </div>
-
-    <div>
-      <label for="dateTo" class="block text-sm font-semibold text-gray-700 mb-2">To Date</label>
-      <input
-        id="dateTo"
-        type="date"
-        bind:value={dateTo}
+        bind:value={orderIdFilter}
+        placeholder="Enter Amazon Order ID..."
         disabled={loading}
         class="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-50"
       />

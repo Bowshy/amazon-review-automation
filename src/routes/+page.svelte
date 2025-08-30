@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { DashboardStats, LegacyAmazonOrder } from '$lib/types';
+  import type { DataTableAction } from '$lib/components/DataTable.types';
   import DataTable from '$lib/components/DataTable.svelte';
   import FilterBar from '$lib/components/FilterBar.svelte';
   import { format } from 'date-fns';
@@ -13,6 +14,8 @@
   let automationLoading = false;
   let retryLoading = false;
   let syncLoading = false;
+  let solicitationLoading: Record<string, boolean> = {};
+  let reviewTriggerLoading: Record<string, boolean> = {};
   
   // Pagination and filtering state
   let currentPage = 1;
@@ -159,6 +162,89 @@
     }
   }
 
+  async function checkSolicitationActions(orderId: string) {
+    try {
+      solicitationLoading[orderId] = true;
+      
+      const response = await fetch(`/api/orders/check-solicitation?orderId=${orderId}`);
+      const result = await response.json();
+      
+      if (result.success) {
+        // Update the order in the local state
+        orders = orders.map(order => {
+          if (order.amazonOrderId === orderId) {
+            return {
+              ...order,
+              hasSolicitationActions: result.data.hasActions,
+              solicitationActions: result.data.actions || []
+            };
+          }
+          return order;
+        });
+        
+        // Show success message
+        if (result.data.hasActions) {
+          console.log(`Order ${orderId} is eligible for review requests`);
+        } else {
+          console.log(`Order ${orderId} is not eligible for review requests`);
+        }
+      } else {
+        console.error('Failed to check solicitation actions:', result.error);
+        alert(`Failed to check solicitation actions: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error checking solicitation actions:', error);
+      alert('Error checking solicitation actions. Please try again.');
+    } finally {
+      solicitationLoading[orderId] = false;
+    }
+  }
+
+  async function triggerReviewRequest(orderId: string) {
+    try {
+      reviewTriggerLoading[orderId] = true;
+      
+      const response = await fetch('/api/orders/trigger-review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ orderId })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // Update the order in the local state
+        orders = orders.map(order => {
+          if (order.amazonOrderId === orderId) {
+            return {
+              ...order,
+              reviewRequestSent: true,
+              reviewRequestDate: new Date().toISOString(),
+              reviewRequestStatus: 'SENT'
+            };
+          }
+          return order;
+        });
+        
+        // Reload dashboard data to update stats
+        await loadDashboardData();
+        
+        // Show success message
+        alert(`Review request sent successfully for order ${orderId}!`);
+      } else {
+        console.error('Failed to trigger review request:', result.error);
+        alert(`Failed to trigger review request: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error triggering review request:', error);
+      alert('Error triggering review request. Please try again.');
+    } finally {
+      reviewTriggerLoading[orderId] = false;
+    }
+  }
+
   async function syncOrders() {
     try {
       syncLoading = true;
@@ -185,6 +271,8 @@
       syncLoading = false;
     }
   }
+
+
 </script>
 
 <svelte:head>
@@ -300,65 +388,88 @@
         </div>
 
         <!-- Additional Stats -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <div class="bg-white rounded-lg shadow p-6">
-            <h3 class="text-lg font-medium text-gray-900 mb-4">Recent Activity</h3>
+            <h3 class="text-lg font-medium text-gray-900 mb-4">Review Request Status</h3>
             <div class="space-y-3">
               <div class="flex justify-between">
-                <span class="text-sm text-gray-500">Today's Requests</span>
-                <span class="text-sm font-medium">{stats.todayRequests}</span>
+                <span class="text-sm text-gray-500">Pending Review Requests</span>
+                <span class="text-sm font-medium text-blue-600">{stats.pendingReviewRequests}</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-sm text-gray-500">This Week</span>
-                <span class="text-sm font-medium">{stats.thisWeekRequests}</span>
+                <span class="text-sm text-gray-500">Review Requests Sent</span>
+                <span class="text-sm font-medium text-green-600">{stats.reviewRequestsSent}</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-sm text-gray-500">This Month</span>
-                <span class="text-sm font-medium">{stats.thisMonthRequests}</span>
+                <span class="text-sm text-gray-500">Failed Review Requests</span>
+                <span class="text-sm font-medium text-red-600">{stats.reviewRequestsFailed}</span>
               </div>
+              <div class="flex justify-between">
+                <span class="text-sm text-gray-500">Skipped Review Requests</span>
+                <span class="text-sm font-medium text-yellow-600">{stats.reviewRequestsSkipped}</span>
+              </div>
+            </div>
+            <div class="mt-4 p-3 bg-blue-50 rounded-lg">
+              <p class="text-xs text-blue-700">
+                <strong>Pending Review Requests:</strong> Orders that are eligible for review requests but haven't been processed yet (delivered 25+ days ago, not returned, shipped status)
+              </p>
             </div>
           </div>
 
           <div class="bg-white rounded-lg shadow p-6">
-            <h3 class="text-lg font-medium text-gray-900 mb-4">Order Status</h3>
+            <h3 class="text-lg font-medium text-gray-900 mb-4">Order Summary</h3>
             <div class="space-y-3">
+              <div class="flex justify-between">
+                <span class="text-sm text-gray-500">Total Orders</span>
+                <span class="text-sm font-medium text-gray-900">{stats.totalOrders}</span>
+              </div>
               <div class="flex justify-between">
                 <span class="text-sm text-gray-500">Returned Orders</span>
-                <span class="text-sm font-medium">{stats.returnedOrders}</span>
+                <span class="text-sm font-medium text-red-600">{stats.returnedOrders}</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-sm text-gray-500">Skipped Requests</span>
-                <span class="text-sm font-medium">{stats.reviewRequestsSkipped}</span>
+                <span class="text-sm text-gray-500">Ineligible for Review</span>
+                <span class="text-sm font-medium text-gray-600">{stats.ineligibleForReview}</span>
+              </div>
+              <div class="flex justify-between border-t pt-2">
+                <span class="text-sm font-medium text-gray-700">Review-Eligible Orders</span>
+                <span class="text-sm font-medium text-green-700">{stats.eligibleForReview}</span>
               </div>
             </div>
+            <div class="mt-4 p-3 bg-gray-50 rounded-lg">
+              <p class="text-xs text-gray-600">
+                <strong>Total Orders =</strong> Returned + Ineligible + Review-Eligible
+              </p>
+            </div>
           </div>
+        </div>
 
-                     <div class="bg-white rounded-lg shadow p-6">
-             <h3 class="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
-             <div class="space-y-3">
-               <button 
-                 on:click={runDailyAutomation}
-                 disabled={automationLoading}
-                 class="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-               >
-                 {automationLoading ? 'Running...' : 'Run Daily Automation'}
-               </button>
-               <button 
-                 on:click={retryFailedRequests}
-                 disabled={retryLoading}
-                 class="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-               >
-                 {retryLoading ? 'Retrying...' : 'Retry Failed Requests'}
-               </button>
-               <button 
-                 on:click={syncOrders}
-                 disabled={syncLoading}
-                 class="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-               >
-                 {syncLoading ? 'Syncing...' : 'Sync Orders'}
-               </button>
-             </div>
-           </div>
+        <!-- Quick Actions -->
+        <div class="bg-white rounded-lg shadow p-6 mb-8">
+          <h3 class="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <button 
+              on:click={runDailyAutomation}
+              disabled={automationLoading}
+              class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {automationLoading ? 'Running...' : 'Run Daily Automation'}
+            </button>
+            <button 
+              on:click={retryFailedRequests}
+              disabled={retryLoading}
+              class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {retryLoading ? 'Retrying...' : 'Retry Failed Requests'}
+            </button>
+            <button 
+              on:click={syncOrders}
+              disabled={syncLoading}
+              class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {syncLoading ? 'Syncing...' : 'Sync Orders'}
+            </button>
+          </div>
         </div>
       {/if}
 
@@ -433,6 +544,55 @@
               width: '120px',
               align: 'right',
               render: (value) => formatCurrency(value.amount, value.currencyCode)
+            },
+            {
+              key: 'solicitationActions',
+              label: 'Actions',
+              width: '200px',
+              align: 'center',
+              actions: (row) => {
+                const actions = [];
+                
+                // Check if we need to check solicitation actions
+                if (row.hasSolicitationActions === undefined) {
+                  actions.push({
+                    label: 'Check Actions',
+                    icon: '🔍',
+                    onClick: () => checkSolicitationActions(row.amazonOrderId),
+                    disabled: solicitationLoading[row.amazonOrderId] || false,
+                    variant: 'secondary' as const
+                  });
+                } else if (row.hasSolicitationActions && !row.reviewRequestSent) {
+                  // Show trigger review button if actions are available and review not sent
+                  actions.push({
+                    label: 'Trigger Review',
+                    icon: '⭐',
+                    onClick: () => triggerReviewRequest(row.amazonOrderId),
+                    disabled: reviewTriggerLoading[row.amazonOrderId] || false,
+                    variant: 'success' as const
+                  });
+                } else if (row.hasSolicitationActions === false) {
+                  // Show not available message
+                  actions.push({
+                    label: 'Not Available',
+                    icon: '❌',
+                    onClick: () => {},
+                    disabled: true,
+                    variant: 'secondary' as const
+                  });
+                } else if (row.reviewRequestSent) {
+                  // Show already sent message
+                  actions.push({
+                    label: 'Already Sent',
+                    icon: '✅',
+                    onClick: () => {},
+                    disabled: true,
+                    variant: 'primary' as const
+                  });
+                }
+                
+                return actions;
+              }
             }
           ]}
           loading={tableLoading}

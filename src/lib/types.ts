@@ -140,7 +140,10 @@ export type ReturnsResponse = GetReportDocumentResponse;
 // ===== SOLICITATIONS API RESPONSES =====
 
 export interface CreateProductReviewAndSellerFeedbackSolicitationResponse {
+  // According to Amazon SP-API documentation, successful response returns 201 status
+  // and may include errors array if there are any issues
   errors?: AmazonAPIError[];
+  // The response body is typically empty for successful requests
 }
 
 export interface GetSolicitationActionsForOrderResponse {
@@ -149,7 +152,10 @@ export interface GetSolicitationActionsForOrderResponse {
     next?: LinkObject;
     actions: LinkObject[];
   };
-  actions?: SolicitationsAction[];
+  _embedded?: {
+    actions?: SolicitationsAction[];
+  };
+  actions?: SolicitationsAction[]; // Legacy support
   errors?: AmazonAPIError[];
 }
 
@@ -342,19 +348,16 @@ export interface DashboardStats {
   reviewRequestsFailed: number;
   reviewRequestsSkipped: number;
   returnedOrders: number;
-  todayRequests: number;
-  thisWeekRequests: number;
-  thisMonthRequests: number;
+  pendingReviewRequests: number;
+  ineligibleForReview: number;
 }
 
 export interface OrderFilters {
-  dateFrom?: string;
-  dateTo?: string;
   status?: string[];
   marketplaceId?: string;
   isReturned?: boolean;
   reviewRequestStatus?: string[];
-  search?: string;
+  orderId?: string;
 }
 
 export interface PaginationParams {

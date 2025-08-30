@@ -6,6 +6,8 @@ A fullstack application built with SvelteKit and PostgreSQL that automatically s
 
 ### Core Functionality
 - **Automated Review Requests**: Sends review requests exactly 25 days after delivery
+- **Manual Review Triggers**: Check and trigger review requests for specific orders
+- **Solicitation Actions**: Verify order eligibility for review requests
 - **Return Check**: Automatically excludes returned orders to avoid negative reviews
 - **Amazon Policy Compliance**: Follows Amazon's 5-30 day review request window
 - **Activity Tracking**: Comprehensive logging of all actions and decisions
