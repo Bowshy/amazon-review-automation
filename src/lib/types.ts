@@ -415,6 +415,78 @@ export enum UserRole {
   VIEWER = 'VIEWER'
 }
 
+// ===== INVENTORY LEDGER REPORT TYPES =====
+
+export interface InventoryLedgerEventData {
+  eventDate: Date;
+  fnsku: string;
+  asin: string;
+  sku: string;
+  productTitle: string;
+  eventType: string;
+  referenceId: string | null;
+  quantity: number;
+  fulfillmentCenter: string | null;
+  disposition: string | null;
+  reconciledQuantity: number;
+  unreconciledQuantity: number;
+  country: string;
+  rawTimestamp: Date;
+  storeId: string | null;
+}
+
+export interface InventoryLedgerEvent {
+  id: string;
+  eventDate: Date;
+  fnsku: string;
+  asin: string;
+  sku: string;
+  productTitle: string;
+  eventType: string;
+  referenceId: string | null;
+  quantity: number;
+  fulfillmentCenter: string | null;
+  disposition: string | null;
+  reconciledQuantity: number;
+  unreconciledQuantity: number;
+  country: string;
+  rawTimestamp: Date;
+  storeId: string | null;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export enum InventoryLedgerStatus {
+  WAITING = 'WAITING',
+  CLAIMABLE = 'CLAIMABLE',
+  RESOLVED = 'RESOLVED',
+  CLAIMED = 'CLAIMED',
+  PAID = 'PAID'
+}
+
+export interface InventoryLedgerStats {
+  totalClaimableUnits: number;
+  totalEstimatedValue: number;
+  totalWaiting: number;
+  totalResolved: number;
+  totalClaimed: number;
+  totalPaid: number;
+  claimableEventsCount: number;
+  waitingEventsCount: number;
+}
+
+export interface InventoryLedgerFilters {
+  status?: string[];
+  eventType?: string[];
+  fulfillmentCenter?: string[];
+  dateFrom?: Date;
+  dateTo?: Date;
+  fnsku?: string;
+  asin?: string;
+  sku?: string;
+}
+
 // ===== API REQUEST LOGGING =====
 
 // Note: API request logging is not implemented in the current schema

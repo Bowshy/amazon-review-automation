@@ -22,7 +22,8 @@
 		"db:validate": "prisma validate",
 		"db:format": "prisma format",
 		"db:lint": "prisma lint",
-		"automation:run-daily": "tsx src/scripts/run-daily-automation.ts"
+		"automation:run-daily": "tsx src/scripts/run-daily-automation.ts",
+		"automation:inventory-ledger-sync": "tsx src/scripts/inventory-ledger-daily-sync.ts"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^1.2.5",

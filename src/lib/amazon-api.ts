@@ -3,7 +3,8 @@ import type {
   AmazonAPIConfig, 
   GetOrdersResponse,
   CreateProductReviewAndSellerFeedbackSolicitationResponse,
-  GetSolicitationActionsForOrderResponse
+  GetSolicitationActionsForOrderResponse,
+  InventoryLedgerEventData
 } from './types';
 import { logger } from './logger';
 
@@ -710,5 +711,201 @@ export class AmazonSPAPI {
       });
       return false;
     }
+  }
+
+  // ===== INVENTORY LEDGER REPORT (AIRPA) METHODS =====
+
+  // Create Inventory Ledger Report (AIRPA)
+  async createInventoryLedgerReport(dataStartTime: string, dataEndTime: string): Promise<Record<string, unknown> | unknown> {
+    const startTime = Date.now();
+    
+    try {
+      logger.info('Creating Inventory Ledger Report (AIRPA)', {
+        dataStartTime,
+        dataEndTime,
+        marketplaceId: this.config.marketplaceId
+      });
+
+      const response = await this.client.callAPI({
+        operation: 'createReport',
+        endpoint: 'reports',
+        body: {
+          marketplaceIds: [this.config.marketplaceId],
+          reportType: 'GET_AFN_INVENTORY_DATA',
+          dataStartTime,
+          dataEndTime
+        }
+      });
+
+      const duration = Date.now() - startTime;
+      logger.info('Amazon API call: createInventoryLedgerReport', {
+        aws: {
+          operation: 'createInventoryLedgerReport',
+          success: true
+        },
+        event: {
+          duration
+        },
+        dataStartTime, 
+        dataEndTime,
+        marketplaceId: this.config.marketplaceId,
+        reportId: (response as any).reportId
+      });
+
+      return response;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logger.error('Amazon API call: createInventoryLedgerReport', {
+        aws: {
+          operation: 'createInventoryLedgerReport',
+          success: false
+        },
+        event: {
+          duration
+        },
+        error: { message: error instanceof Error ? error.message : 'Unknown error' },
+        dataStartTime, 
+        dataEndTime,
+        marketplaceId: this.config.marketplaceId
+      });
+      throw new Error(`Failed to create inventory ledger report: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // Download and parse inventory ledger report data
+  async downloadInventoryLedgerReport(reportDocumentId: string): Promise<InventoryLedgerEventData[]> {
+    const startTime = Date.now();
+    
+    try {
+      // First get the report document URL
+      const reportDocument = await this.getReportDocument(reportDocumentId);
+      
+      if (!reportDocument.url) {
+        throw new Error('No download URL found in report document');
+      }
+
+      logger.info('Downloading inventory ledger report data', {
+        reportDocumentId,
+        url: reportDocument.url
+      });
+
+      // Download the report data using the SDK's download method
+      const reportData = await this.client.download(reportDocument) as string;
+      
+      // Parse the TSV data
+      const lines = reportData.split('\n').filter((line: string) => line.trim());
+      if (lines.length === 0) {
+        logger.warn('No data found in inventory ledger report', { reportDocumentId });
+        return [];
+      }
+
+      const headers = lines[0].split('\t');
+      const data: InventoryLedgerEventData[] = lines.slice(1).map((line: string) => {
+        const values = line.split('\t');
+        const row: Record<string, string> = {};
+        headers.forEach((header: string, index: number) => {
+          row[header.trim()] = values[index]?.trim() || '';
+        });
+        
+        // Map the row data to our InventoryLedgerEventData interface
+        return {
+          eventDate: this.parseAmazonDate(row['Date'] || row['date'] || ''),
+          fnsku: row['FNSKU'] || row['fnsku'] || '',
+          asin: row['ASIN'] || row['asin'] || '',
+          sku: row['MSKU'] || row['sku'] || row['MSKU'] || '',
+          productTitle: row['Product Title'] || row['product_title'] || row['ProductName'] || '',
+          eventType: row['Event Type'] || row['event_type'] || row['Transaction Type'] || '',
+          referenceId: row['Reference ID'] || row['reference_id'] || row['ReferenceId'] || null,
+          quantity: parseInt(row['Quantity'] || row['quantity'] || '0', 10),
+          fulfillmentCenter: row['Fulfillment Center'] || row['fulfillment_center'] || row['FC'] || null,
+          disposition: row['Disposition'] || row['disposition'] || null,
+          reconciledQuantity: parseInt(row['Reconciled Quantity'] || row['reconciled_quantity'] || '0', 10),
+          unreconciledQuantity: parseInt(row['Unreconciled Quantity'] || row['unreconciled_quantity'] || '0', 10),
+          country: row['Country'] || row['country'] || 'US',
+          rawTimestamp: this.parseAmazonDateTime(row['Date and Time'] || row['raw_timestamp'] || row['Timestamp'] || ''),
+          storeId: row['Store ID'] || row['store_id'] || null
+        };
+      }).filter(event => event.fnsku && event.asin); // Filter out invalid rows
+
+      const duration = Date.now() - startTime;
+      logger.info('Inventory ledger report downloaded and parsed successfully', {
+        aws: {
+          operation: 'downloadInventoryLedgerReport',
+          success: true
+        },
+        event: {
+          duration
+        },
+        reportDocumentId,
+        rowCount: data.length,
+        totalLines: lines.length
+      });
+
+      return data;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logger.error('Failed to download inventory ledger report', {
+        aws: {
+          operation: 'downloadInventoryLedgerReport',
+          success: false
+        },
+        event: {
+          duration
+        },
+        error: { message: error instanceof Error ? error.message : 'Unknown error' },
+        reportDocumentId
+      });
+      throw new Error(`Failed to download inventory ledger report: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // Helper method to parse Amazon date format
+  private parseAmazonDate(dateStr: string): Date {
+    if (!dateStr) return new Date();
+    
+    // Try different date formats that Amazon might use
+    const formats = [
+      /^\d{4}-\d{2}-\d{2}$/, // YYYY-MM-DD
+      /^\d{2}\/\d{2}\/\d{4}$/, // MM/DD/YYYY
+      /^\d{2}-\d{2}-\d{4}$/, // MM-DD-YYYY
+    ];
+    
+    for (const format of formats) {
+      if (format.test(dateStr)) {
+        const date = new Date(dateStr);
+        if (!isNaN(date.getTime())) {
+          return date;
+        }
+      }
+    }
+    
+    // Fallback to current date if parsing fails
+    logger.warn('Failed to parse Amazon date', { dateStr });
+    return new Date();
+  }
+
+  // Helper method to parse Amazon datetime format
+  private parseAmazonDateTime(dateTimeStr: string): Date {
+    if (!dateTimeStr) return new Date();
+    
+    // Try different datetime formats
+    const formats = [
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, // ISO format
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/, // YYYY-MM-DD HH:MM:SS
+      /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}/, // MM/DD/YYYY HH:MM:SS
+    ];
+    
+    for (const format of formats) {
+      if (format.test(dateTimeStr)) {
+        const date = new Date(dateTimeStr);
+        if (!isNaN(date.getTime())) {
+          return date;
+        }
+      }
+    }
+    
+    // Fallback to current date if parsing fails
+    logger.warn('Failed to parse Amazon datetime', { dateTimeStr });
+    return new Date();
   }
 }

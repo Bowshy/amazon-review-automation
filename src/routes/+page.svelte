@@ -289,6 +289,12 @@
           <p class="text-gray-600">Automated review requests for Amazon orders</p>
         </div>
         <div class="flex space-x-4">
+          <a 
+            href="/inventory-ledger"
+            class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+          >
+            Inventory Ledger
+          </a>
           <button 
             on:click={async () => {
               await loadDashboardData();
