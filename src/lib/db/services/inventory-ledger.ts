@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { AmazonSPAPI } from '$lib/amazon-api';
 import { getAmazonConfig, validateAmazonConfig } from '$lib/config/amazon';
 import { logger } from '$lib/logger';
+import { databaseManager } from '$lib/db/config/prisma';
 import type { 
   InventoryLedgerEventData, 
   InventoryLedgerEvent, 
@@ -10,11 +11,21 @@ import type {
 } from '$lib/types';
 
 export class InventoryLedgerService {
-  private db: PrismaClient;
+  private db: PrismaClient | null = null;
   private api: AmazonSPAPI | null = null;
 
   constructor() {
-    this.db = new PrismaClient();
+    // Don't create PrismaClient here, get it from database manager
+  }
+
+  /**
+   * Get database client from shared manager
+   */
+  private async getDb(): Promise<PrismaClient> {
+    if (!this.db) {
+      this.db = await databaseManager.getClient();
+    }
+    return this.db;
   }
 
   /**
@@ -160,7 +171,8 @@ export class InventoryLedgerService {
     for (const eventData of eligibleData) {
       try {
         // Check if event already exists (by unique combination of fields)
-        const existingEvent = await this.db.inventoryLedgerEvent.findFirst({
+        const db = await this.getDb();
+        const existingEvent = await db.inventoryLedgerEvent.findFirst({
           where: {
             fnsku: eventData.fnsku,
             asin: eventData.asin,
@@ -207,8 +219,9 @@ export class InventoryLedgerService {
    */
   private async createInventoryLedgerEvent(data: InventoryLedgerEventData): Promise<InventoryLedgerEvent> {
     const status = this.calculateEventStatus(data);
+    const db = await this.getDb();
     
-    const event = await this.db.inventoryLedgerEvent.create({
+    const event = await db.inventoryLedgerEvent.create({
       data: {
         eventDate: data.eventDate,
         fnsku: data.fnsku,
@@ -247,8 +260,9 @@ export class InventoryLedgerService {
    */
   private async updateInventoryLedgerEvent(eventId: string, data: InventoryLedgerEventData): Promise<InventoryLedgerEvent> {
     const status = this.calculateEventStatus(data);
+    const db = await this.getDb();
     
-    const event = await this.db.inventoryLedgerEvent.update({
+    const event = await db.inventoryLedgerEvent.update({
       where: { id: eventId },
       data: {
         eventDate: data.eventDate,
@@ -337,7 +351,8 @@ export class InventoryLedgerService {
       const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
 
       // Update WAITING events that are now 7+ days old to CLAIMABLE
-      const waitingToClaimable = await this.db.inventoryLedgerEvent.updateMany({
+      const db = await this.getDb();
+      const waitingToClaimable = await db.inventoryLedgerEvent.updateMany({
         where: {
           status: 'WAITING',
           eventDate: {
@@ -353,7 +368,7 @@ export class InventoryLedgerService {
       });
 
       // Update CLAIMABLE events that are now reconciled to RESOLVED
-      const claimableToResolved = await this.db.inventoryLedgerEvent.updateMany({
+      const claimableToResolved = await db.inventoryLedgerEvent.updateMany({
         where: {
           status: 'CLAIMABLE',
           unreconciledQuantity: 0
@@ -456,14 +471,15 @@ export class InventoryLedgerService {
       where.sku = { contains: filters.sku, mode: 'insensitive' };
     }
 
+    const db = await this.getDb();
     const [events, total] = await Promise.all([
-      this.db.inventoryLedgerEvent.findMany({
+      db.inventoryLedgerEvent.findMany({
         where,
         orderBy: { eventDate: 'desc' },
         skip,
         take: limit
       }),
-      this.db.inventoryLedgerEvent.count({ where })
+      db.inventoryLedgerEvent.count({ where })
     ]);
 
     const totalPages = Math.ceil(total / limit);
@@ -482,6 +498,7 @@ export class InventoryLedgerService {
    */
   async getInventoryLedgerStats(): Promise<InventoryLedgerStats> {
     try {
+      const db = await this.getDb();
       const [
         claimableEvents,
         waitingEvents,
@@ -489,21 +506,21 @@ export class InventoryLedgerService {
         claimedEvents,
         paidEvents
       ] = await Promise.all([
-        this.db.inventoryLedgerEvent.findMany({
+        db.inventoryLedgerEvent.findMany({
           where: { status: 'CLAIMABLE' },
           select: { quantity: true, unreconciledQuantity: true }
         }),
-        this.db.inventoryLedgerEvent.findMany({
+        db.inventoryLedgerEvent.findMany({
           where: { status: 'WAITING' },
           select: { quantity: true, unreconciledQuantity: true }
         }),
-        this.db.inventoryLedgerEvent.count({
+        db.inventoryLedgerEvent.count({
           where: { status: 'RESOLVED' }
         }),
-        this.db.inventoryLedgerEvent.count({
+        db.inventoryLedgerEvent.count({
           where: { status: 'CLAIMED' }
         }),
-        this.db.inventoryLedgerEvent.count({
+        db.inventoryLedgerEvent.count({
           where: { status: 'PAID' }
         })
       ]);
@@ -549,19 +566,40 @@ export class InventoryLedgerService {
   }
 
   /**
-   * Get claimable events for dashboard display
+   * Get claimable events for dashboard display with pagination and sorting
    */
-  async getClaimableEvents(limit: number = 100): Promise<InventoryLedgerEvent[]> {
+  async getClaimableEvents(
+    limit: number = 100, 
+    offset: number = 0, 
+    sortBy: string = 'eventDate', 
+    sortOrder: 'asc' | 'desc' = 'desc'
+  ): Promise<InventoryLedgerEvent[]> {
     try {
-      return await this.db.inventoryLedgerEvent.findMany({
+      // Validate sort field
+      const validSortFields = ['eventDate', 'fnsku', 'asin', 'sku', 'eventType', 'fulfillmentCenter', 'unreconciledQuantity'];
+      const sortField = validSortFields.includes(sortBy) ? sortBy : 'eventDate';
+      
+      // Build orderBy object
+      const orderBy: any = {};
+      orderBy[sortField] = sortOrder;
+
+      const db = await this.getDb();
+      return await db.inventoryLedgerEvent.findMany({
         where: { status: 'CLAIMABLE' },
-        orderBy: { eventDate: 'desc' },
-        take: limit
+        orderBy,
+        take: limit,
+        skip: offset
       });
     } catch (error) {
       // If table doesn't exist, return empty array
       if (error instanceof Error && error.message.includes('does not exist')) {
-        logger.warn('Inventory ledger events table does not exist, returning empty events');
+        logger.warn('Inventory ledger events table does not exist, returning empty events', {
+          operation: 'getClaimableEvents',
+          limit,
+          offset,
+          sortBy,
+          sortOrder
+        });
         return [];
       }
       throw error;
@@ -582,7 +620,8 @@ export class InventoryLedgerService {
    * Update event status to CLAIMED
    */
   async markEventAsClaimed(eventId: string): Promise<InventoryLedgerEvent> {
-    return this.db.inventoryLedgerEvent.update({
+    const db = await this.getDb();
+    return db.inventoryLedgerEvent.update({
       where: { id: eventId },
       data: { status: 'CLAIMED' }
     });
@@ -592,7 +631,8 @@ export class InventoryLedgerService {
    * Update event status to PAID
    */
   async markEventAsPaid(eventId: string): Promise<InventoryLedgerEvent> {
-    return this.db.inventoryLedgerEvent.update({
+    const db = await this.getDb();
+    return db.inventoryLedgerEvent.update({
       where: { id: eventId },
       data: { status: 'PAID' }
     });
@@ -605,7 +645,8 @@ export class InventoryLedgerService {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysOld);
 
-    const result = await this.db.inventoryLedgerEvent.deleteMany({
+    const db = await this.getDb();
+    const result = await db.inventoryLedgerEvent.deleteMany({
       where: {
         status: 'RESOLVED',
         updatedAt: {
@@ -626,6 +667,8 @@ export class InventoryLedgerService {
    * Close database connection
    */
   async disconnect(): Promise<void> {
-    await this.db.$disconnect();
+    // Don't disconnect the shared database manager
+    // The database manager handles its own connection lifecycle
+    this.db = null;
   }
 }

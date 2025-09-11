@@ -1,51 +1,108 @@
-import { json } from '@sveltejs/kit';
+import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { InventoryLedgerService } from '$lib/db/services/inventory-ledger';
 import { logger } from '$lib/logger';
 
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async ({ url }) => {
   const startTime = Date.now();
   
   try {
-    const service = new InventoryLedgerService();
-    const stats = await service.getInventoryLedgerStats();
-
-    const duration = Date.now() - startTime;
+    // Validate request parameters
+    const cacheControl = url.searchParams.get('cache') || 'no-cache';
+    
     logger.info('API call: getInventoryLedgerStats', {
       aws: {
         operation: 'getInventoryLedgerStats',
         success: true
       },
       event: {
-        duration
+        startTime: new Date(startTime).toISOString()
       },
-      stats
+      request: {
+        cacheControl,
+        userAgent: url.searchParams.get('userAgent') || 'unknown'
+      }
+    });
+
+    const service = new InventoryLedgerService();
+    
+    // Get stats with proper error handling
+    const stats = await service.getInventoryLedgerStats();
+
+    const duration = Date.now() - startTime;
+    
+    logger.info('API call: getInventoryLedgerStats completed', {
+      aws: {
+        operation: 'getInventoryLedgerStats',
+        success: true
+      },
+      event: {
+        duration,
+        endTime: new Date().toISOString()
+      },
+      response: {
+        totalClaimableUnits: stats.totalClaimableUnits,
+        totalWaiting: stats.totalWaiting,
+        claimableEventsCount: stats.claimableEventsCount,
+        waitingEventsCount: stats.waitingEventsCount
+      }
     });
 
     await service.disconnect();
 
     return json({
       success: true,
-      data: stats
+      data: stats,
+      meta: {
+        timestamp: new Date().toISOString(),
+        duration
+      }
+    }, {
+      headers: {
+        'Cache-Control': cacheControl === 'cache' ? 'public, max-age=300' : 'no-cache',
+        'Content-Type': 'application/json'
+      }
     });
 
-  } catch (error) {
+  } catch (err) {
     const duration = Date.now() - startTime;
-    logger.error('API call: getInventoryLedgerStats', {
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+    
+    logger.error('API call: getInventoryLedgerStats failed', {
       aws: {
         operation: 'getInventoryLedgerStats',
         success: false
       },
       event: {
-        duration
+        duration,
+        endTime: new Date().toISOString()
       },
-      error: { message: error instanceof Error ? error.message : 'Unknown error' }
+      error: { 
+        message: errorMessage,
+        stack: err instanceof Error ? err.stack : undefined,
+        name: err instanceof Error ? err.name : 'UnknownError'
+      }
     });
 
-    return json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 });
+    // Return appropriate HTTP status based on error type
+    if (errorMessage.includes('does not exist') || errorMessage.includes('table')) {
+      return error(503, {
+        message: 'Service temporarily unavailable',
+        details: 'Database schema not initialized'
+      });
+    }
+
+    if (errorMessage.includes('connection') || errorMessage.includes('timeout')) {
+      return error(503, {
+        message: 'Service temporarily unavailable', 
+        details: 'Database connection issue'
+      });
+    }
+
+    return error(500, {
+      message: 'Internal server error',
+      details: 'Failed to retrieve inventory ledger statistics'
+    });
   }
 };
 

@@ -1,20 +1,23 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { page } from '$app/stores';
-  import { goto } from '$app/navigation';
   import DataTable from '$lib/components/DataTable.svelte';
-  import type { InventoryLedgerEvent, InventoryLedgerStats } from '$lib/types';
-  import type { PageData } from './$types';
 
-  // Props from page data
-  let { data }: { data: PageData } = $props();
+  // Mock data for testing
+  let stats = {
+    totalClaimableUnits: 0,
+    totalEstimatedValue: 0,
+    totalWaiting: 0,
+    totalResolved: 0,
+    totalClaimed: 0,
+    totalPaid: 0,
+    claimableEventsCount: 0,
+    waitingEventsCount: 0
+  };
 
-  // Reactive state
-  let stats = $state(data.stats);
-  let claimableEvents = $state(data.claimableEvents);
-  let loading = $state(false);
-  let error = $state<string | null>(null);
-  let refreshing = $state(false);
+  let claimableEvents = [];
+  let loading = false;
+  let error = null;
+  let refreshing = false;
 
   // Table columns for claimable events
   const columns = [
@@ -23,7 +26,7 @@
       label: 'Date', 
       sortable: true, 
       width: '120px',
-      render: (value: Date) => formatDate(value)
+      render: (value) => formatDate(value)
     },
     { key: 'sku', label: 'SKU', sortable: true, width: '150px' },
     { key: 'asin', label: 'ASIN', sortable: true, width: '120px' },
@@ -32,7 +35,7 @@
       label: 'Product Title', 
       sortable: false, 
       width: '300px',
-      render: (value: string) => value.length > 50 ? value.substring(0, 50) + '...' : value
+      render: (value) => value.length > 50 ? value.substring(0, 50) + '...' : value
     },
     { key: 'eventType', label: 'Event Type', sortable: true, width: '120px' },
     { 
@@ -40,106 +43,72 @@
       label: 'FC', 
       sortable: true, 
       width: '80px',
-      render: (value: string | null) => value || 'N/A'
+      render: (value) => value || 'N/A'
     },
     { 
       key: 'unreconciledQuantity', 
       label: 'Qty Lost', 
       sortable: true, 
       width: '100px',
-      render: (value: number) => Math.abs(value).toString()
+      render: (value) => Math.abs(value).toString()
     },
     { 
       key: 'status', 
       label: 'Status', 
       sortable: true, 
       width: '100px',
-      render: (value: string) => `<span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">${value}</span>`
-    },
-    { 
-      key: 'actions', 
-      label: 'Actions', 
-      sortable: false, 
-      width: '120px',
-      actions: (event: InventoryLedgerEvent) => [
-        {
-          label: 'Generate Claim',
-          icon: '📋',
-          variant: 'primary' as const,
-          onClick: () => generateClaimText(event.id),
-          disabled: refreshing
-        },
-        {
-          label: 'Mark Claimed',
-          icon: '✅',
-          variant: 'success' as const,
-          onClick: () => markAsClaimed(event.id),
-          disabled: refreshing
-        }
-      ]
+      render: (value) => `<span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">${value}</span>`
     }
   ];
 
-  // Pagination state
-  let currentPage = 1;
-  let pageSize = 20;
-  const totalPages = $derived(Math.ceil(claimableEvents.length / pageSize));
-
-  // Sorting state
-  let sortBy = 'eventDate';
-  let sortOrder: 'asc' | 'desc' = 'desc';
-
-  // Computed pagination info
-  const pagination = $derived({
-    page: currentPage,
-    limit: pageSize,
-    total: claimableEvents.length,
-    totalPages: totalPages
-  });
-
-  // Computed paginated data
-  const paginatedEvents = $derived(claimableEvents.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  ));
+  function formatDate(date) {
+    return new Date(date).toLocaleDateString();
+  }
 
   async function refreshData() {
     try {
       refreshing = true;
       error = null;
 
-      // Load fresh data
-      const [statsResponse, claimableResponse] = await Promise.all([
-        fetch('/api/inventory-ledger/stats?cache=no-cache'),
-        fetch(`/api/inventory-ledger/claimable?limit=100&sortBy=${sortBy}&sortOrder=${sortOrder}&cache=no-cache`)
-      ]);
+      // Simulate API calls
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-      if (!statsResponse.ok) {
-        throw new Error(`Failed to load stats: ${statsResponse.statusText}`);
-      }
+      // Mock some data
+      stats = {
+        totalClaimableUnits: 5,
+        totalEstimatedValue: 0,
+        totalWaiting: 3,
+        totalResolved: 10,
+        totalClaimed: 2,
+        totalPaid: 1,
+        claimableEventsCount: 2,
+        waitingEventsCount: 3
+      };
 
-      if (!claimableResponse.ok) {
-        throw new Error(`Failed to load claimable events: ${claimableResponse.statusText}`);
-      }
-
-      const statsData = await statsResponse.json();
-      const claimableData = await claimableResponse.json();
-
-      if (!statsData.success) {
-        throw new Error(statsData.error || 'Failed to load stats');
-      }
-
-      if (!claimableData.success) {
-        throw new Error(claimableData.error || 'Failed to load claimable events');
-      }
-
-      stats = statsData.data;
-      claimableEvents = claimableData.data;
-      
-      // Reset to first page if current page is out of bounds
-      if (currentPage > totalPages) {
-        currentPage = 1;
-      }
+      claimableEvents = [
+        {
+          id: '1',
+          eventDate: new Date('2024-01-15'),
+          sku: 'TEST-SKU-001',
+          asin: 'B123456789',
+          productTitle: 'Test Product 1',
+          eventType: 'Shipments',
+          fulfillmentCenter: 'JFK8',
+          unreconciledQuantity: -2,
+          status: 'CLAIMABLE'
+        },
+        {
+          id: '2',
+          eventDate: new Date('2024-01-16'),
+          sku: 'TEST-SKU-002',
+          asin: 'B987654321',
+          productTitle: 'Test Product 2',
+          eventType: 'Adjustments',
+          fulfillmentCenter: 'LAX9',
+          unreconciledQuantity: -1,
+          status: 'CLAIMABLE'
+        }
+      ];
 
     } catch (err) {
       error = err instanceof Error ? err.message : 'Unknown error occurred';
@@ -149,78 +118,20 @@
     }
   }
 
-  function handleSort(event: CustomEvent<{ sortBy: string; sortOrder: 'asc' | 'desc' }>) {
-    sortBy = event.detail.sortBy;
-    sortOrder = event.detail.sortOrder;
+  onMount(() => {
     refreshData();
-  }
-
-  function handlePageChange(event: CustomEvent<{ page: number }>) {
-    currentPage = event.detail.page;
-  }
-
-  function handleLimitChange(event: CustomEvent<{ limit: number }>) {
-    pageSize = event.detail.limit;
-    currentPage = 1; // Reset to first page
-  }
-
-  async function generateClaimText(eventId: string) {
-    try {
-      const response = await fetch(`/api/inventory-ledger/claim-text/${eventId}`);
-      const data = await response.json();
-
-      if (data.success) {
-        // Copy to clipboard
-        await navigator.clipboard.writeText(data.data.claimText);
-        alert('Claim text copied to clipboard!');
-      } else {
-        alert(`Failed to generate claim text: ${data.error}`);
-      }
-    } catch (err) {
-      alert(`Error generating claim text: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    }
-  }
-
-  async function markAsClaimed(eventId: string) {
-    if (!confirm('Are you sure you want to mark this event as claimed?')) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/inventory-ledger/${eventId}/claim`, {
-        method: 'POST'
-      });
-      const data = await response.json();
-
-      if (data.success) {
-        alert('Event marked as claimed successfully!');
-        await refreshData(); // Refresh data
-      } else {
-        alert(`Failed to mark as claimed: ${data.error}`);
-      }
-    } catch (err) {
-      alert(`Error marking as claimed: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    }
-  }
-
-  function formatDate(date: string | Date): string {
-    return new Date(date).toLocaleDateString();
-  }
-
-  function formatQuantity(quantity: number): string {
-    return Math.abs(quantity).toString();
-  }
+  });
 </script>
 
 <svelte:head>
-  <title>Inventory Ledger - Amazon Review Automation</title>
+  <title>Inventory Ledger (Simple) - Amazon Review Automation</title>
 </svelte:head>
 
 <div class="min-h-screen bg-gray-50">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
     <!-- Header -->
     <div class="mb-8">
-      <h1 class="text-3xl font-bold text-gray-900">Inventory Ledger</h1>
+      <h1 class="text-3xl font-bold text-gray-900">Inventory Ledger (Simple Test)</h1>
       <p class="mt-2 text-gray-600">
         Monitor lost, damaged, and missing inventory from Amazon Inventory Ledger Report (AIRPA)
       </p>
@@ -383,13 +294,15 @@
             </div>
           {:else}
             <DataTable
-              data={paginatedEvents}
+              data={claimableEvents}
               columns={columns}
-              pagination={pagination}
+              pagination={{
+                page: 1,
+                limit: 20,
+                total: claimableEvents.length,
+                totalPages: 1
+              }}
               loading={refreshing}
-              on:sort={handleSort}
-              on:pageChange={handlePageChange}
-              on:limitChange={handleLimitChange}
             />
           {/if}
         </div>
@@ -397,6 +310,3 @@
     {/if}
   </div>
 </div>
-
-
-

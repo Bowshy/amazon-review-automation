@@ -720,7 +720,7 @@ export class AmazonSPAPI {
     const startTime = Date.now();
     
     try {
-      logger.info('Creating Inventory Ledger Report (AIRPA)', {
+      logger.info('Creating Inventory Ledger Report (AIRPA) - GET_LEDGER_DETAIL_VIEW_DATA', {
         dataStartTime,
         dataEndTime,
         marketplaceId: this.config.marketplaceId
@@ -731,9 +731,12 @@ export class AmazonSPAPI {
         endpoint: 'reports',
         body: {
           marketplaceIds: [this.config.marketplaceId],
-          reportType: 'GET_AFN_INVENTORY_DATA',
+          reportType: 'GET_LEDGER_DETAIL_VIEW_DATA',
           dataStartTime,
-          dataEndTime
+          dataEndTime,
+          reportOptions: {
+            aggregatedByTimePeriod: 'DAILY'
+          }
         }
       });
 

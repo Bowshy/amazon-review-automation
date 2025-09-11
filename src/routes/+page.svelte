@@ -1,11 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { DashboardStats, LegacyAmazonOrder } from '$lib/types';
-  import type { DataTableAction } from '$lib/components/DataTable.types';
-  import DataTable from '$lib/components/DataTable.svelte';
-  import FilterBar from '$lib/components/FilterBar.svelte';
+  import type { DashboardStats, LegacyAmazonOrder, InventoryLedgerStats, InventoryLedgerEvent } from '$lib/types';
+  import TabbedLayout from '$lib/components/TabbedLayout.svelte';
   import { format } from 'date-fns';
 
+  // Reviews data
   let stats: DashboardStats | null = null;
   let orders: LegacyAmazonOrder[] = [];
   let loading = true;
@@ -17,7 +16,7 @@
   let solicitationLoading: Record<string, boolean> = {};
   let reviewTriggerLoading: Record<string, boolean> = {};
   
-  // Pagination and filtering state
+  // Pagination and filtering state for reviews
   let currentPage = 1;
   let pageSize = 20;
   let totalOrders = 0;
@@ -26,8 +25,19 @@
   let sortBy = 'deliveryDate';
   let sortOrder: 'asc' | 'desc' = 'desc';
 
+  // Inventory ledger data
+  let inventoryStats: InventoryLedgerStats | null = null;
+  let claimableEvents: InventoryLedgerEvent[] = [];
+  let inventoryLoading = false;
+  let inventoryError: string | null = null;
+  let inventoryRefreshing = false;
+
+  // Active tab
+  let activeTab: 'reviews' | 'inventory' = 'reviews';
+
   onMount(async () => {
     await loadDashboardData();
+    await loadInventoryData();
   });
 
   async function loadOrders() {
@@ -93,6 +103,37 @@
     }
   }
 
+  async function loadInventoryData() {
+    try {
+      inventoryLoading = true;
+      inventoryError = null;
+
+      // Load inventory ledger stats
+      const statsResponse = await fetch('/api/inventory-ledger/stats?cache=no-cache');
+      if (statsResponse.ok) {
+        const statsData = await statsResponse.json();
+        if (statsData.success) {
+          inventoryStats = statsData.data;
+        }
+      }
+
+      // Load claimable events
+      const claimableResponse = await fetch('/api/inventory-ledger/claimable?limit=100&cache=no-cache');
+      if (claimableResponse.ok) {
+        const claimableData = await claimableResponse.json();
+        if (claimableData.success) {
+          claimableEvents = claimableData.data;
+        }
+      }
+
+    } catch (err) {
+      inventoryError = err instanceof Error ? err.message : 'Unknown error occurred';
+      console.error('Failed to load inventory data:', err);
+    } finally {
+      inventoryLoading = false;
+    }
+  }
+
   function getStatusColor(status: string) {
     switch (status) {
       case 'SENT': return 'text-green-600 bg-green-100';
@@ -108,6 +149,71 @@
       style: 'currency',
       currency: currency || 'USD'
     }).format(parseFloat(amount));
+  }
+
+  // Event handlers for tabbed layout
+  function handleTabChange(event: CustomEvent<{ tab: 'reviews' | 'inventory' }>) {
+    activeTab = event.detail.tab;
+  }
+
+  function handleReviewsRefresh() {
+    loadDashboardData();
+  }
+
+  function handleInventoryRefresh() {
+    loadInventoryData();
+  }
+
+  function handleRunAutomation() {
+    runDailyAutomation();
+  }
+
+  function handleRetryFailed() {
+    retryFailedRequests();
+  }
+
+  function handleSyncOrders() {
+    syncOrders();
+  }
+
+  function handleCheckSolicitation(event: CustomEvent<{ orderId: string }>) {
+    checkSolicitationActions(event.detail.orderId);
+  }
+
+  function handleTriggerReview(event: CustomEvent<{ orderId: string }>) {
+    triggerReviewRequest(event.detail.orderId);
+  }
+
+  function handleReviewsSort(event: CustomEvent<{ sortBy: string; sortOrder: 'asc' | 'desc' }>) {
+    sortBy = event.detail.sortBy;
+    sortOrder = event.detail.sortOrder;
+    loadOrders();
+  }
+
+  function handleReviewsPageChange(event: CustomEvent<{ page: number }>) {
+    currentPage = event.detail.page;
+    loadOrders();
+  }
+
+  function handleReviewsFilterChange(event: CustomEvent<{ filters: Record<string, any> }>) {
+    currentFilters = event.detail.filters;
+    currentPage = 1;
+    loadOrders();
+  }
+
+  function handleInventorySort(event: CustomEvent<{ sortBy: string; sortOrder: 'asc' | 'desc' }>) {
+    // Handle inventory sorting if needed
+    console.log('Inventory sort:', event.detail);
+  }
+
+  function handleInventoryPageChange(event: CustomEvent<{ page: number }>) {
+    // Handle inventory pagination if needed
+    console.log('Inventory page change:', event.detail);
+  }
+
+  function handleInventoryFilterChange(event: CustomEvent<{ filters: Record<string, any> }>) {
+    // Handle inventory filtering if needed
+    console.log('Inventory filter change:', event.detail);
   }
 
   async function runDailyAutomation() {
@@ -276,358 +382,49 @@
 </script>
 
 <svelte:head>
-  <title>Amazon Review Automation - Dashboard</title>
+  <title>Amazon Seller Suite - Review Automation & Inventory Management</title>
 </svelte:head>
 
-<div class="min-h-screen bg-gray-50">
-  <!-- Header -->
-  <header class="bg-white shadow">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="flex justify-between items-center py-6">
-        <div>
-          <h1 class="text-3xl font-bold text-gray-900">Amazon Review Automation</h1>
-          <p class="text-gray-600">Automated review requests for Amazon orders</p>
-        </div>
-        <div class="flex space-x-4">
-          <a 
-            href="/inventory-ledger"
-            class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
-          >
-            Inventory Ledger
-          </a>
-          <button 
-            on:click={async () => {
-              await loadDashboardData();
-              await loadOrders();
-            }}
-            class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Refresh
-          </button>
-        </div>
-      </div>
-    </div>
-  </header>
-
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-    {#if loading}
-      <div class="flex justify-center items-center py-12">
-        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    {:else if error}
-      <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-        <div class="flex">
-          <div class="flex-shrink-0">
-            <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
-            </svg>
-          </div>
-          <div class="ml-3">
-            <h3 class="text-sm font-medium text-red-800">Error</h3>
-            <p class="text-sm text-red-700 mt-1">{error}</p>
-          </div>
-        </div>
-      </div>
-    {:else}
-      <!-- Stats Grid -->
-      {#if stats}
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <!-- Total Orders -->
-          <div class="bg-white rounded-lg shadow p-6">
-            <div class="flex items-center">
-              <div class="flex-shrink-0">
-                <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
-                </svg>
-              </div>
-              <div class="ml-4">
-                <p class="text-sm font-medium text-gray-500">Total Orders</p>
-                <p class="text-2xl font-semibold text-gray-900">{stats.totalOrders}</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Eligible for Review -->
-          <div class="bg-white rounded-lg shadow p-6">
-            <div class="flex items-center">
-              <div class="flex-shrink-0">
-                <svg class="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-              </div>
-              <div class="ml-4">
-                <p class="text-sm font-medium text-gray-500">Eligible for Review</p>
-                <p class="text-2xl font-semibold text-gray-900">{stats.eligibleForReview}</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Review Requests Sent -->
-          <div class="bg-white rounded-lg shadow p-6">
-            <div class="flex items-center">
-              <div class="flex-shrink-0">
-                <svg class="h-8 w-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                </svg>
-              </div>
-              <div class="ml-4">
-                <p class="text-sm font-medium text-gray-500">Requests Sent</p>
-                <p class="text-2xl font-semibold text-gray-900">{stats.reviewRequestsSent}</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Failed Requests -->
-          <div class="bg-white rounded-lg shadow p-6">
-            <div class="flex items-center">
-              <div class="flex-shrink-0">
-                <svg class="h-8 w-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-              </div>
-              <div class="ml-4">
-                <p class="text-sm font-medium text-gray-500">Failed Requests</p>
-                <p class="text-2xl font-semibold text-gray-900">{stats.reviewRequestsFailed}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Additional Stats -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <div class="bg-white rounded-lg shadow p-6">
-            <h3 class="text-lg font-medium text-gray-900 mb-4">Review Request Status</h3>
-            <div class="space-y-3">
-              <div class="flex justify-between">
-                <span class="text-sm text-gray-500">Pending Review Requests</span>
-                <span class="text-sm font-medium text-blue-600">{stats.pendingReviewRequests}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-sm text-gray-500">Review Requests Sent</span>
-                <span class="text-sm font-medium text-green-600">{stats.reviewRequestsSent}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-sm text-gray-500">Failed Review Requests</span>
-                <span class="text-sm font-medium text-red-600">{stats.reviewRequestsFailed}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-sm text-gray-500">Skipped Review Requests</span>
-                <span class="text-sm font-medium text-yellow-600">{stats.reviewRequestsSkipped}</span>
-              </div>
-            </div>
-            <div class="mt-4 p-3 bg-blue-50 rounded-lg">
-              <p class="text-xs text-blue-700">
-                <strong>Pending Review Requests:</strong> Orders that are eligible for review requests but haven't been processed yet (delivered 25+ days ago, not returned, shipped status)
-              </p>
-            </div>
-          </div>
-
-          <div class="bg-white rounded-lg shadow p-6">
-            <h3 class="text-lg font-medium text-gray-900 mb-4">Order Summary</h3>
-            <div class="space-y-3">
-              <div class="flex justify-between">
-                <span class="text-sm text-gray-500">Total Orders</span>
-                <span class="text-sm font-medium text-gray-900">{stats.totalOrders}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-sm text-gray-500">Returned Orders</span>
-                <span class="text-sm font-medium text-red-600">{stats.returnedOrders}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-sm text-gray-500">Ineligible for Review</span>
-                <span class="text-sm font-medium text-gray-600">{stats.ineligibleForReview}</span>
-              </div>
-              <div class="flex justify-between border-t pt-2">
-                <span class="text-sm font-medium text-gray-700">Review-Eligible Orders</span>
-                <span class="text-sm font-medium text-green-700">{stats.eligibleForReview}</span>
-              </div>
-            </div>
-            <div class="mt-4 p-3 bg-gray-50 rounded-lg">
-              <p class="text-xs text-gray-600">
-                <strong>Total Orders =</strong> Returned + Ineligible + Review-Eligible
-              </p>
-              <p class="text-xs text-gray-600 mt-1">
-                <strong>Calculation:</strong> {stats.returnedOrders} + {stats.ineligibleForReview} + {stats.eligibleForReview} = {stats.returnedOrders + stats.ineligibleForReview + stats.eligibleForReview}
-              </p>
-              <p class="text-xs text-gray-600 mt-1">
-                <strong>Total in DB:</strong> {stats.totalOrders} | <strong>Match:</strong> {stats.totalOrders === (stats.returnedOrders + stats.ineligibleForReview + stats.eligibleForReview) ? '✅' : '❌'}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Quick Actions -->
-        <div class="bg-white rounded-lg shadow p-6 mb-8">
-          <h3 class="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <button 
-              on:click={runDailyAutomation}
-              disabled={automationLoading}
-              class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {automationLoading ? 'Running...' : 'Run Daily Automation'}
-            </button>
-            <button 
-              on:click={retryFailedRequests}
-              disabled={retryLoading}
-              class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {retryLoading ? 'Retrying...' : 'Retry Failed Requests'}
-            </button>
-            <button 
-              on:click={syncOrders}
-              disabled={syncLoading}
-              class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {syncLoading ? 'Syncing...' : 'Sync Orders'}
-            </button>
-          </div>
-        </div>
-      {/if}
-
-      <!-- Orders Table -->
-      <div class="bg-white rounded-lg shadow">
-        <div class="px-6 py-4 border-b border-gray-200">
-          <h2 class="text-lg font-medium text-gray-900">Orders</h2>
-        </div>
-        
-        <!-- Filter Bar -->
-        <FilterBar 
-          filters={currentFilters} 
-          loading={tableLoading}
-          on:filterChange={async (event) => {
-            currentFilters = event.detail.filters;
-            currentPage = 1;
-            await loadOrders();
-          }}
-        />
-        
-        <!-- Data Table -->
-        <DataTable
-          data={orders}
-          columns={[
-            {
-              key: 'amazonOrderId',
-              label: 'Order ID',
-              sortable: true,
-              width: '200px'
-            },
-            {
-              key: 'purchaseDate',
-              label: 'Purchase Date',
-              sortable: true,
-              width: '150px',
-              render: (value) => value ? format(new Date(value), 'MMM dd, yyyy') : '—'
-            },
-            {
-              key: 'deliveryDate',
-              label: 'Delivery Date',
-              sortable: true,
-              width: '150px',
-              render: (value) => value ? format(new Date(value), 'MMM dd, yyyy') : '—'
-            },
-            {
-              key: 'orderStatus',
-              label: 'Status',
-              sortable: true,
-              width: '120px',
-              render: (value) => {
-                const colorClass = getStatusColor(value);
-                return `<span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full ${colorClass}">${value}</span>`;
-              }
-            },
-            {
-              key: 'reviewRequestStatus',
-              label: 'Review Request',
-              sortable: true,
-              width: '140px',
-              render: (value, row) => {
-                if (value) {
-                  const colorClass = getStatusColor(value);
-                  return `<span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full ${colorClass}">${value}</span>`;
-                }
-                return 'Not sent';
-              }
-            },
-            {
-              key: 'orderTotal',
-              label: 'Total',
-              sortable: true,
-              width: '120px',
-              align: 'right',
-              render: (value) => formatCurrency(value.amount, value.currencyCode)
-            },
-            {
-              key: 'solicitationActions',
-              label: 'Actions',
-              width: '200px',
-              align: 'center',
-              actions: (row) => {
-                const actions = [];
-                
-                // Check if we need to check solicitation actions
-                if (row.hasSolicitationActions === undefined) {
-                  actions.push({
-                    label: 'Check Actions',
-                    icon: '🔍',
-                    onClick: () => checkSolicitationActions(row.amazonOrderId),
-                    disabled: solicitationLoading[row.amazonOrderId] || false,
-                    variant: 'secondary' as const
-                  });
-                } else if (row.hasSolicitationActions && !row.reviewRequestSent) {
-                  // Show trigger review button if actions are available and review not sent
-                  actions.push({
-                    label: 'Trigger Review',
-                    icon: '⭐',
-                    onClick: () => triggerReviewRequest(row.amazonOrderId),
-                    disabled: reviewTriggerLoading[row.amazonOrderId] || false,
-                    variant: 'success' as const
-                  });
-                } else if (row.hasSolicitationActions === false) {
-                  // Show not available message
-                  actions.push({
-                    label: 'Not Available',
-                    icon: '❌',
-                    onClick: () => {},
-                    disabled: true,
-                    variant: 'secondary' as const
-                  });
-                } else if (row.reviewRequestSent) {
-                  // Show already sent message
-                  actions.push({
-                    label: 'Already Sent',
-                    icon: '✅',
-                    onClick: () => {},
-                    disabled: true,
-                    variant: 'primary' as const
-                  });
-                }
-                
-                return actions;
-              }
-            }
-          ]}
-          loading={tableLoading}
-          pagination={{
-            page: currentPage,
-            limit: pageSize,
-            total: totalOrders,
-            totalPages: totalPages
-          }}
-          filters={currentFilters}
-          {sortBy}
-          {sortOrder}
-          on:sort={async (event) => {
-            sortBy = event.detail.sortBy;
-            sortOrder = event.detail.sortOrder;
-            await loadOrders();
-          }}
-          on:pageChange={async (event) => {
-            currentPage = event.detail.page;
-            await loadOrders();
-          }}
-        />
-      </div>
-    {/if}
-  </main>
-</div>
+<TabbedLayout
+  {activeTab}
+  reviewsData={{
+    stats,
+    orders,
+    loading,
+    tableLoading,
+    error,
+    automationLoading,
+    retryLoading,
+    syncLoading,
+    solicitationLoading,
+    reviewTriggerLoading,
+    currentPage,
+    pageSize,
+    totalOrders,
+    totalPages,
+    currentFilters,
+    sortBy,
+    sortOrder
+  }}
+  inventoryData={{
+    stats: inventoryStats,
+    claimableEvents,
+    loading: inventoryLoading,
+    error: inventoryError,
+    refreshing: inventoryRefreshing
+  }}
+  on:tabChange={handleTabChange}
+  on:reviewsRefresh={handleReviewsRefresh}
+  on:inventoryRefresh={handleInventoryRefresh}
+  on:runAutomation={handleRunAutomation}
+  on:retryFailed={handleRetryFailed}
+  on:syncOrders={handleSyncOrders}
+  on:checkSolicitation={handleCheckSolicitation}
+  on:triggerReview={handleTriggerReview}
+  on:reviewsSort={handleReviewsSort}
+  on:reviewsPageChange={handleReviewsPageChange}
+  on:reviewsFilterChange={handleReviewsFilterChange}
+  on:inventorySort={handleInventorySort}
+  on:inventoryPageChange={handleInventoryPageChange}
+  on:inventoryFilterChange={handleInventoryFilterChange}
+/>
