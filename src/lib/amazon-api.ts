@@ -7,6 +7,7 @@ import type {
   InventoryLedgerEventData
 } from './types';
 import { logger } from './logger';
+import { InventoryLedgerDebugUtils } from './debug/inventory-ledger-debug';
 
 export class AmazonSPAPI {
   private client: SellingPartner;
@@ -413,7 +414,7 @@ export class AmazonSPAPI {
     
     while (Date.now() - startTime < maxWaitTime) {
       try {
-        const report = await this.getReport(reportId);
+        const report = await this.getReport(reportId) as Record<string, unknown>;
         
         if (report.processingStatus === 'DONE') {
           logger.info('Report is ready', { 
@@ -795,40 +796,124 @@ export class AmazonSPAPI {
       // Download the report data using the SDK's download method
       const reportData = await this.client.download(reportDocument) as string;
       
-      // Parse the TSV data
+      logger.info('Raw inventory ledger report data received', {
+        reportDocumentId,
+        dataLength: reportData.length,
+        firstChars: reportData.substring(0, 500), // Log first 500 characters
+        lastChars: reportData.substring(Math.max(0, reportData.length - 500)), // Log last 500 characters
+        hasData: reportData.length > 0,
+        lineCount: reportData.split('\n').length
+      });
+
+      // Save raw report data for debugging
+      try {
+        await InventoryLedgerDebugUtils.saveRawReportData(reportDocumentId, reportData);
+      } catch (debugError) {
+        logger.warn('Failed to save raw report data for debugging', {
+          error: { message: debugError instanceof Error ? debugError.message : 'Unknown error' }
+        });
+      }
+      
+      // Parse the TSV data (handling quoted fields)
       const lines = reportData.split('\n').filter((line: string) => line.trim());
       if (lines.length === 0) {
-        logger.warn('No data found in inventory ledger report', { reportDocumentId });
+        logger.warn('No data found in inventory ledger report', { 
+          reportDocumentId,
+          rawDataLength: reportData.length,
+          rawDataPreview: reportData.substring(0, 1000)
+        });
         return [];
       }
 
-      const headers = lines[0].split('\t');
-      const data: InventoryLedgerEventData[] = lines.slice(1).map((line: string) => {
-        const values = line.split('\t');
+      // Helper function to parse TSV line with quoted fields
+      const parseTSVLine = (line: string): string[] => {
+        const result: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === '\t' && !inQuotes) {
+            result.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        result.push(current.trim());
+        return result;
+      };
+
+      const headers = parseTSVLine(lines[0]);
+      
+      logger.info('Parsing inventory ledger report headers', {
+        reportDocumentId,
+        headerCount: headers.length,
+        headers: headers,
+        firstLine: lines[0],
+        totalLines: lines.length
+      });
+      
+      const data: InventoryLedgerEventData[] = lines.slice(1).map((line: string, index: number) => {
+        const values = parseTSVLine(line);
         const row: Record<string, string> = {};
-        headers.forEach((header: string, index: number) => {
-          row[header.trim()] = values[index]?.trim() || '';
+        headers.forEach((header: string, colIndex: number) => {
+          // Remove quotes from header names and values
+          const cleanHeader = header.replace(/"/g, '').trim();
+          const cleanValue = (values[colIndex] || '').replace(/"/g, '').trim();
+          row[cleanHeader] = cleanValue;
         });
+        
+        // Log first few rows for debugging
+        if (index < 3) {
+          logger.info('Parsing inventory ledger report row', {
+            reportDocumentId,
+            rowIndex: index,
+            headers: headers,
+            values: values,
+            parsedRow: row
+          });
+        }
         
         // Map the row data to our InventoryLedgerEventData interface
         return {
-          eventDate: this.parseAmazonDate(row['Date'] || row['date'] || ''),
-          fnsku: row['FNSKU'] || row['fnsku'] || '',
-          asin: row['ASIN'] || row['asin'] || '',
-          sku: row['MSKU'] || row['sku'] || row['MSKU'] || '',
-          productTitle: row['Product Title'] || row['product_title'] || row['ProductName'] || '',
-          eventType: row['Event Type'] || row['event_type'] || row['Transaction Type'] || '',
-          referenceId: row['Reference ID'] || row['reference_id'] || row['ReferenceId'] || null,
-          quantity: parseInt(row['Quantity'] || row['quantity'] || '0', 10),
-          fulfillmentCenter: row['Fulfillment Center'] || row['fulfillment_center'] || row['FC'] || null,
-          disposition: row['Disposition'] || row['disposition'] || null,
-          reconciledQuantity: parseInt(row['Reconciled Quantity'] || row['reconciled_quantity'] || '0', 10),
-          unreconciledQuantity: parseInt(row['Unreconciled Quantity'] || row['unreconciled_quantity'] || '0', 10),
-          country: row['Country'] || row['country'] || 'US',
-          rawTimestamp: this.parseAmazonDateTime(row['Date and Time'] || row['raw_timestamp'] || row['Timestamp'] || ''),
-          storeId: row['Store ID'] || row['store_id'] || null
+          eventDate: this.parseAmazonDate(row['Date'] || ''),
+          fnsku: row['FNSKU'] || '',
+          asin: row['ASIN'] || '',
+          sku: row['MSKU'] || '',
+          productTitle: row['Title'] || '',
+          eventType: row['Event Type'] || '',
+          referenceId: row['Reference ID'] || null,
+          quantity: parseInt(row['Quantity'] || '0', 10),
+          fulfillmentCenter: row['Fulfillment Center'] || null,
+          disposition: row['Disposition'] || null,
+          reconciledQuantity: parseInt(row['Reconciled Quantity'] || '0', 10),
+          unreconciledQuantity: parseInt(row['Unreconciled Quantity'] || '0', 10),
+          country: row['Country'] || 'US',
+          rawTimestamp: this.parseAmazonDateTime(row['Date and Time'] || ''),
+          storeId: row['Store'] || null
         };
-      }).filter(event => event.fnsku && event.asin); // Filter out invalid rows
+      });
+      
+      // Log filtering results
+      const validData = data.filter(event => event.fnsku && event.asin);
+      const invalidData = data.filter(event => !event.fnsku || !event.asin);
+      
+      logger.info('Inventory ledger report parsing completed', {
+        reportDocumentId,
+        totalRows: data.length,
+        validRows: validData.length,
+        invalidRows: invalidData.length,
+        invalidRowReasons: invalidData.map(event => ({
+          hasFNSKU: !!event.fnsku,
+          hasASIN: !!event.asin,
+          fnsku: event.fnsku,
+          asin: event.asin
+        }))
+      });
 
       const duration = Date.now() - startTime;
       logger.info('Inventory ledger report downloaded and parsed successfully', {
@@ -840,11 +925,13 @@ export class AmazonSPAPI {
           duration
         },
         reportDocumentId,
-        rowCount: data.length,
-        totalLines: lines.length
+        rowCount: validData.length,
+        totalLines: lines.length,
+        validRows: validData.length,
+        invalidRows: invalidData.length
       });
 
-      return data;
+      return validData;
     } catch (error) {
       const duration = Date.now() - startTime;
       logger.error('Failed to download inventory ledger report', {

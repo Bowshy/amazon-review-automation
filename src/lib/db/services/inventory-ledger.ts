@@ -3,12 +3,14 @@ import { AmazonSPAPI } from '$lib/amazon-api';
 import { getAmazonConfig, validateAmazonConfig } from '$lib/config/amazon';
 import { logger } from '$lib/logger';
 import { databaseManager } from '$lib/db/config/prisma';
+import { InventoryLedgerDebugUtils } from '$lib/debug/inventory-ledger-debug';
 import type { 
   InventoryLedgerEventData, 
   InventoryLedgerEvent, 
   InventoryLedgerStats,
   InventoryLedgerFilters
 } from '$lib/types';
+import { InventoryLedgerStatus } from '@prisma/client';
 
 export class InventoryLedgerService {
   private db: PrismaClient | null = null;
@@ -64,9 +66,27 @@ export class InventoryLedgerService {
     updatedEventsCount: number;
   }> {
     const startTime = Date.now();
+    const apiResponses: Record<string, {
+      request: Record<string, unknown>;
+      response: Record<string, unknown>;
+      duration: number;
+      timestamp: string;
+    }> = {};
+    const errors: Array<{
+      message: string;
+      stack?: string;
+      timestamp: string;
+    }> = [];
     
     try {
       logger.info('Starting inventory ledger report fetch and process', {
+        aws: {
+          operation: 'fetchAndProcessInventoryLedgerReport',
+          success: true
+        },
+        event: {
+          startTime: new Date(startTime).toISOString()
+        },
         dataStartTime,
         dataEndTime
       });
@@ -74,47 +94,235 @@ export class InventoryLedgerService {
       const api = await this.initializeApi();
 
       // Step 1: Create the report
+      logger.info('Step 1: Creating inventory ledger report', {
+        dataStartTime,
+        dataEndTime
+      });
+      
+      const createStartTime = Date.now();
       const createResponse = await api.createInventoryLedgerReport(dataStartTime, dataEndTime);
-      const reportId = (createResponse as any).reportId;
+      const createDuration = Date.now() - createStartTime;
+      
+      apiResponses.createReportResponse = {
+        request: { dataStartTime, dataEndTime },
+        response: createResponse as Record<string, unknown>,
+        duration: createDuration,
+        timestamp: new Date().toISOString()
+      };
+      
+      // Save API response for debugging
+      try {
+        await InventoryLedgerDebugUtils.saveApiResponse({
+          timestamp: new Date().toISOString(),
+          operation: 'createInventoryLedgerReport',
+          request: { dataStartTime, dataEndTime },
+          response: createResponse,
+          duration: createDuration,
+          success: true
+        });
+      } catch (debugError) {
+        logger.warn('Failed to save API response for debugging', {
+          error: { message: debugError instanceof Error ? debugError.message : 'Unknown error' }
+        });
+      }
+      
+      const reportId = (createResponse as Record<string, unknown>).reportId as string;
 
       if (!reportId) {
-        throw new Error('No report ID returned from Amazon API');
+        const errorMsg = 'No report ID returned from Amazon API';
+        logger.error(errorMsg, { createResponse });
+        throw new Error(errorMsg);
       }
 
-      logger.info('Inventory ledger report created', { reportId });
+      logger.info('Inventory ledger report created successfully', {
+        aws: {
+          operation: 'createInventoryLedgerReport',
+          success: true
+        },
+        event: {
+          duration: createDuration
+        },
+        reportId,
+        createResponse
+      });
 
       // Step 2: Wait for report to be ready
+      logger.info('Step 2: Waiting for report to be ready', { reportId });
+      
+      const waitStartTime = Date.now();
       const report = await api.waitForReportReady(reportId);
+      const waitDuration = Date.now() - waitStartTime;
+      
+      apiResponses.reportStatusResponse = {
+        request: { reportId },
+        response: report,
+        duration: waitDuration,
+        timestamp: new Date().toISOString()
+      };
+      
+      // Save API response for debugging
+      try {
+        await InventoryLedgerDebugUtils.saveApiResponse({
+          timestamp: new Date().toISOString(),
+          operation: 'waitForReportReady',
+          request: { reportId },
+          response: report,
+          duration: waitDuration,
+          success: true
+        });
+      } catch (debugError) {
+        logger.warn('Failed to save API response for debugging', {
+          error: { message: debugError instanceof Error ? debugError.message : 'Unknown error' }
+        });
+      }
       
       if (!report.reportDocumentId) {
-        throw new Error('No report document ID found in completed report');
+        const errorMsg = 'No report document ID found in completed report';
+        logger.error(errorMsg, { report });
+        throw new Error(errorMsg);
       }
 
-      // Step 3: Download and parse report data
-      const reportData = await api.downloadInventoryLedgerReport(report.reportDocumentId);
-      
-      logger.info('Inventory ledger report data downloaded', {
+      logger.info('Report is ready for download', {
+        aws: {
+          operation: 'waitForReportReady',
+          success: true
+        },
+        event: {
+          duration: waitDuration
+        },
         reportId,
         reportDocumentId: report.reportDocumentId,
-        rowCount: reportData.length
+        reportStatus: report.processingStatus
+      });
+
+      // Step 3: Download and parse report data
+      logger.info('Step 3: Downloading and parsing report data', {
+        reportId,
+        reportDocumentId: report.reportDocumentId
+      });
+      
+      const downloadStartTime = Date.now();
+      const reportData = await api.downloadInventoryLedgerReport(report.reportDocumentId);
+      const downloadDuration = Date.now() - downloadStartTime;
+      
+      apiResponses.reportDataResponse = {
+        request: { reportDocumentId: report.reportDocumentId },
+        response: { rowCount: reportData.length, sampleData: reportData.slice(0, 5) },
+        duration: downloadDuration,
+        timestamp: new Date().toISOString()
+      };
+      
+      // Save API response for debugging
+      try {
+        await InventoryLedgerDebugUtils.saveApiResponse({
+          timestamp: new Date().toISOString(),
+          operation: 'downloadInventoryLedgerReport',
+          request: { reportDocumentId: report.reportDocumentId },
+          response: { rowCount: reportData.length, sampleData: reportData.slice(0, 5) },
+          duration: downloadDuration,
+          success: true
+        });
+      } catch (debugError) {
+        logger.warn('Failed to save API response for debugging', {
+          error: { message: debugError instanceof Error ? debugError.message : 'Unknown error' }
+        });
+      }
+      
+      logger.info('Inventory ledger report data downloaded successfully', {
+        aws: {
+          operation: 'downloadInventoryLedgerReport',
+          success: true
+        },
+        event: {
+          duration: downloadDuration
+        },
+        reportId,
+        reportDocumentId: report.reportDocumentId,
+        rowCount: reportData.length,
+        dataSample: reportData.slice(0, 3) // Log first 3 rows for debugging
       });
 
       // Step 4: Process and store the data
+      logger.info('Step 4: Processing and storing report data', {
+        totalRows: reportData.length
+      });
+      
+      const processStartTime = Date.now();
       const result = await this.processInventoryLedgerData(reportData);
+      const processDuration = Date.now() - processStartTime;
+
+      logger.info('Report data processed successfully', {
+        aws: {
+          operation: 'processInventoryLedgerData',
+          success: true
+        },
+        event: {
+          duration: processDuration
+        },
+        processedCount: result.processedCount,
+        newEventsCount: result.newEventsCount,
+        updatedEventsCount: result.updatedEventsCount
+      });
+
+      // Get current stats and claimable events for debugging
+      let stats: InventoryLedgerStats = {
+        totalClaimableUnits: 0,
+        totalEstimatedValue: 0,
+        totalWaiting: 0,
+        totalResolved: 0,
+        totalClaimed: 0,
+        totalPaid: 0,
+        claimableEventsCount: 0,
+        waitingEventsCount: 0
+      };
+      let claimableEvents: InventoryLedgerEvent[] = [];
+      try {
+        stats = await this.getInventoryLedgerStats();
+        claimableEvents = await this.getClaimableEvents(100, 0, 'eventDate', 'desc');
+      } catch (statsError) {
+        logger.warn('Failed to get stats for debugging', {
+          error: { message: statsError instanceof Error ? statsError.message : 'Unknown error' }
+        });
+      }
 
       const duration = Date.now() - startTime;
-      logger.info('Inventory ledger report fetch and process completed', {
+      
+      // Save complete debug report
+      try {
+        await InventoryLedgerDebugUtils.saveSyncReport({
+          timestamp: new Date().toISOString(),
+          reportId,
+          dataStartTime,
+          dataEndTime,
+          syncResult: result,
+          stats,
+          claimableEvents,
+          apiResponses,
+          errors: errors.length > 0 ? errors : undefined,
+          duration
+        });
+      } catch (debugError) {
+        logger.warn('Failed to save complete debug report', {
+          error: { message: debugError instanceof Error ? debugError.message : 'Unknown error' }
+        });
+      }
+      
+      logger.info('Inventory ledger report fetch and process completed successfully', {
         aws: {
           operation: 'fetchAndProcessInventoryLedgerReport',
           success: true
         },
         event: {
-          duration
+          duration,
+          endTime: new Date().toISOString()
         },
         reportId,
         processedCount: result.processedCount,
         newEventsCount: result.newEventsCount,
-        updatedEventsCount: result.updatedEventsCount
+        updatedEventsCount: result.updatedEventsCount,
+        totalClaimableUnits: stats.totalClaimableUnits || 0,
+        claimableEventsCount: stats.claimableEventsCount || 0,
+        apiResponses: Object.keys(apiResponses).length
       });
 
       return {
@@ -126,17 +334,53 @@ export class InventoryLedgerService {
 
     } catch (error) {
       const duration = Date.now() - startTime;
+      const errorData = {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        timestamp: new Date().toISOString()
+      };
+      errors.push(errorData);
+      
+      // Save error debug report
+      try {
+        await InventoryLedgerDebugUtils.saveSyncReport({
+          timestamp: new Date().toISOString(),
+          dataStartTime,
+          dataEndTime,
+          stats: {
+            totalClaimableUnits: 0,
+            totalEstimatedValue: 0,
+            totalWaiting: 0,
+            totalResolved: 0,
+            totalClaimed: 0,
+            totalPaid: 0,
+            claimableEventsCount: 0,
+            waitingEventsCount: 0
+          },
+          claimableEvents: [],
+          apiResponses,
+          errors,
+          duration
+        });
+      } catch (debugError) {
+        logger.warn('Failed to save error debug report', {
+          error: { message: debugError instanceof Error ? debugError.message : 'Unknown error' }
+        });
+      }
+      
       logger.error('Failed to fetch and process inventory ledger report', {
         aws: {
           operation: 'fetchAndProcessInventoryLedgerReport',
           success: false
         },
         event: {
-          duration
+          duration,
+          endTime: new Date().toISOString()
         },
-        error: { message: error instanceof Error ? error.message : 'Unknown error' },
+        error: errorData,
         dataStartTime,
-        dataEndTime
+        dataEndTime,
+        apiResponses: Object.keys(apiResponses).length
       });
       throw error;
     }
@@ -156,16 +400,79 @@ export class InventoryLedgerService {
 
     // Filter eligible event types (Phase 1 business logic)
     const eligibleEventTypes = ['Shipments', 'WhseTransfers', 'Adjustments', 'Receipts'];
-    const eligibleData = data.filter(event => 
-      eligibleEventTypes.includes(event.eventType) &&
-      event.quantity < 0 && // Negative movement = unit left inventory
-      event.unreconciledQuantity > 0 // Amazon has not resolved it yet
-    );
+    const eligibleData = data.filter(event => {
+      // Must be an eligible event type
+      if (!eligibleEventTypes.includes(event.eventType)) {
+        return false;
+      }
+      
+      // For different event types, apply different criteria:
+      if (event.eventType === 'Adjustments') {
+        // Adjustments: Must have negative quantity (inventory loss)
+        return event.quantity < 0;
+      } else if (event.eventType === 'WhseTransfers') {
+        // Warehouse transfers: Include all (positive = inbound, negative = outbound)
+        // This helps track inventory movements and potential issues
+        return true;
+      } else if (event.eventType === 'Shipments') {
+        // Shipments: Must have negative quantity (inventory left warehouse)
+        return event.quantity < 0;
+      } else if (event.eventType === 'Receipts') {
+        // Receipts: Must have positive quantity (inventory received)
+        return event.quantity > 0;
+      }
+      
+      // Default: include all other eligible event types
+      return true;
+    });
 
-    logger.info('Filtered eligible inventory ledger events', {
+    // Log detailed filtering information
+    const filteringStats = {
       totalEvents: data.length,
       eligibleEvents: eligibleData.length,
-      eligibleEventTypes
+      filteredOut: data.length - eligibleData.length,
+      eventTypeBreakdown: {} as Record<string, number>,
+      quantityBreakdown: {
+        positive: 0,
+        negative: 0,
+        zero: 0
+      },
+      reconciliationBreakdown: {
+        unreconciled: 0,
+        reconciled: 0,
+        empty: 0
+      }
+    };
+
+    // Analyze why events were filtered
+    data.forEach(event => {
+      // Event type breakdown
+      filteringStats.eventTypeBreakdown[event.eventType] = (filteringStats.eventTypeBreakdown[event.eventType] || 0) + 1;
+      
+      // Quantity breakdown
+      if (event.quantity > 0) filteringStats.quantityBreakdown.positive++;
+      else if (event.quantity < 0) filteringStats.quantityBreakdown.negative++;
+      else filteringStats.quantityBreakdown.zero++;
+      
+      // Reconciliation breakdown
+      if (event.unreconciledQuantity > 0) filteringStats.reconciliationBreakdown.unreconciled++;
+      else if (event.unreconciledQuantity === 0) filteringStats.reconciliationBreakdown.reconciled++;
+      else filteringStats.reconciliationBreakdown.empty++;
+    });
+
+    logger.info('Filtered eligible inventory ledger events', {
+      ...filteringStats,
+      eligibleEventTypes,
+      eventTypeBreakdown: filteringStats.eventTypeBreakdown,
+      quantityBreakdown: filteringStats.quantityBreakdown,
+      reconciliationBreakdown: filteringStats.reconciliationBreakdown,
+      sampleEligibleEvents: eligibleData.slice(0, 5).map(event => ({
+        fnsku: event.fnsku,
+        eventType: event.eventType,
+        quantity: event.quantity,
+        unreconciledQuantity: event.unreconciledQuantity,
+        status: this.calculateEventStatus(event)
+      }))
     });
 
     for (const eventData of eligibleData) {
@@ -300,29 +607,43 @@ export class InventoryLedgerService {
   /**
    * Calculate event status based on business logic
    */
-  private calculateEventStatus(data: InventoryLedgerEventData): string {
+  private calculateEventStatus(data: InventoryLedgerEventData): InventoryLedgerStatus {
     const now = new Date();
     const eventAge = now.getTime() - data.eventDate.getTime();
     const daysOld = Math.floor(eventAge / (1000 * 60 * 60 * 24));
 
+    // For warehouse transfers (positive quantities), mark as RESOLVED
+    // These are normal inventory movements, not losses to claim
+    if (data.eventType === 'WhseTransfers' && data.quantity > 0) {
+      return InventoryLedgerStatus.RESOLVED;
+    }
+
+    // For receipts (positive quantities), mark as RESOLVED
+    // These are normal inventory receipts
+    if (data.eventType === 'Receipts' && data.quantity > 0) {
+      return InventoryLedgerStatus.RESOLVED;
+    }
+
+    // For losses (negative quantities) or problematic transfers:
+    // If already reconciled (unreconciled = 0), mark as RESOLVED
+    if (data.unreconciledQuantity === 0) {
+      return InventoryLedgerStatus.RESOLVED;
+    }
+
+    // For unreconciled losses:
     // If event is less than 7 days old, mark as WAITING
     if (daysOld < 7) {
-      return 'WAITING';
+      return InventoryLedgerStatus.WAITING;
     }
 
     // If 7+ days old and still unreconciled, mark as CLAIMABLE
-    if (data.unreconciledQuantity > 0) {
-      return 'CLAIMABLE';
-    }
-
-    // If reconciled (unreconciled = 0), mark as RESOLVED
-    return 'RESOLVED';
+    return InventoryLedgerStatus.CLAIMABLE;
   }
 
   /**
    * Check if event data has changed
    */
-  private hasEventDataChanged(existing: any, newData: InventoryLedgerEventData): boolean {
+  private hasEventDataChanged(existing: Partial<InventoryLedgerEvent>, newData: InventoryLedgerEventData): boolean {
     return (
       existing.quantity !== newData.quantity ||
       existing.reconciledQuantity !== newData.reconciledQuantity ||
@@ -434,7 +755,7 @@ export class InventoryLedgerService {
   }> {
     const skip = (page - 1) * limit;
     
-    const where: any = {};
+    const where: Record<string, unknown> = {};
 
     // Apply filters
     if (filters.status && filters.status.length > 0) {
@@ -452,10 +773,10 @@ export class InventoryLedgerService {
     if (filters.dateFrom || filters.dateTo) {
       where.eventDate = {};
       if (filters.dateFrom) {
-        where.eventDate.gte = filters.dateFrom;
+        (where.eventDate as Record<string, unknown>).gte = filters.dateFrom;
       }
       if (filters.dateTo) {
-        where.eventDate.lte = filters.dateTo;
+        (where.eventDate as Record<string, unknown>).lte = filters.dateTo;
       }
     }
 
@@ -580,7 +901,7 @@ export class InventoryLedgerService {
       const sortField = validSortFields.includes(sortBy) ? sortBy : 'eventDate';
       
       // Build orderBy object
-      const orderBy: any = {};
+      const orderBy: Record<string, 'asc' | 'desc'> = {};
       orderBy[sortField] = sortOrder;
 
       const db = await this.getDb();

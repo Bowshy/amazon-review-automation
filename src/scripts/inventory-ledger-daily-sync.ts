@@ -13,6 +13,7 @@
  */
 
 import { InventoryLedgerService } from '../lib/db/services/inventory-ledger';
+import { InventoryLedgerDebugUtils } from '../lib/debug/inventory-ledger-debug';
 import { logger } from '../lib/logger';
 
 async function runDailyInventoryLedgerSync() {
@@ -79,6 +80,34 @@ async function runDailyInventoryLedgerSync() {
       totalPaid: stats.totalPaid
     });
 
+    // Step 4: Save comprehensive debug report for this sync operation
+    logger.info('Step 4: Saving comprehensive debug report');
+    let debugReportPath = '';
+    try {
+      debugReportPath = await InventoryLedgerDebugUtils.saveSyncReport({
+        timestamp: new Date().toISOString(),
+        reportId: syncResult.reportId,
+        dataStartTime,
+        dataEndTime,
+        syncResult,
+        statusUpdateResult,
+        stats,
+        claimableEvents: [], // We'll get this if needed
+        duration: Date.now() - startTime
+      });
+      
+      logger.info('Debug report saved successfully', {
+        debugReportPath,
+        reportId: syncResult.reportId,
+        dataStartTime,
+        dataEndTime
+      });
+    } catch (debugError) {
+      logger.warn('Failed to save debug report', {
+        error: { message: debugError instanceof Error ? debugError.message : 'Unknown error' }
+      });
+    }
+
     const duration = Date.now() - startTime;
     logger.info('Daily inventory ledger sync script completed successfully', {
       aws: {
@@ -86,14 +115,16 @@ async function runDailyInventoryLedgerSync() {
         success: true
       },
       event: {
-        duration
+        duration,
+        endTime: new Date().toISOString()
       },
       summary: {
         syncResult,
         statusUpdateResult,
         stats,
         dataStartTime,
-        dataEndTime
+        dataEndTime,
+        debugReportPath
       }
     });
 
@@ -107,24 +138,57 @@ async function runDailyInventoryLedgerSync() {
     console.log(`💰 Claimable units: ${stats.totalClaimableUnits}`);
     console.log(`⏳ Waiting events: ${stats.waitingEventsCount}`);
     console.log(`✅ Claimable events: ${stats.claimableEventsCount}`);
+    if (debugReportPath) {
+      console.log(`📁 Debug report saved: ${debugReportPath}`);
+    }
 
     process.exit(0);
 
   } catch (error) {
     const duration = Date.now() - startTime;
+    const errorData = {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      timestamp: new Date().toISOString()
+    };
+    
     logger.error('Daily inventory ledger sync script failed', {
       aws: {
         operation: 'dailyInventoryLedgerSync',
         success: false
       },
       event: {
-        duration
+        duration,
+        endTime: new Date().toISOString()
       },
-      error: { 
-        message: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined
-      }
+      error: errorData
     });
+
+    // Try to save error debug report
+    try {
+      await InventoryLedgerDebugUtils.saveSyncReport({
+        timestamp: new Date().toISOString(),
+        dataStartTime: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        dataEndTime: new Date().toISOString(),
+        stats: {
+          totalClaimableUnits: 0,
+          totalEstimatedValue: 0,
+          totalWaiting: 0,
+          totalResolved: 0,
+          totalClaimed: 0,
+          totalPaid: 0,
+          claimableEventsCount: 0,
+          waitingEventsCount: 0
+        },
+        claimableEvents: [],
+        errors: [errorData],
+        duration
+      });
+    } catch (debugError) {
+      logger.warn('Failed to save error debug report', {
+        error: { message: debugError instanceof Error ? debugError.message : 'Unknown error' }
+      });
+    }
 
     console.error('❌ Daily inventory ledger sync failed:');
     console.error(error instanceof Error ? error.message : 'Unknown error');
