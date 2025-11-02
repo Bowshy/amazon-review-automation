@@ -4,55 +4,60 @@ import { AmazonService } from '$lib/db/services/amazon';
 import { logger } from '$lib/logger';
 
 export const POST: RequestHandler = async ({ request }) => {
-  const startTime = Date.now();
-  
-  try {
-    const { orderId } = await request.json();
-    
-    if (!orderId) {
-      return json({
-        success: false,
-        error: 'Order ID is required'
-      }, { status: 400 });
-    }
+	const startTime = Date.now();
 
-    logger.info('Triggering review request for order', {
-      endpoint: '/api/orders/trigger-review',
-      method: 'POST',
-      orderId
-    });
+	try {
+		const { orderId } = await request.json();
 
-    const amazonService = new AmazonService();
-    const result = await amazonService.triggerReviewRequest(orderId);
+		if (!orderId) {
+			return json(
+				{
+					success: false,
+					error: 'Order ID is required'
+				},
+				{ status: 400 }
+			);
+		}
 
-    const duration = Date.now() - startTime;
-    
-    logger.info('Review request triggered', {
-      endpoint: '/api/orders/trigger-review',
-      duration,
-      orderId,
-      success: result.success,
-      status: result.status,
-      error: result.error
-    });
+		logger.info('Triggering review request for order', {
+			endpoint: '/api/orders/trigger-review',
+			method: 'POST',
+			orderId
+		});
 
-    return json({
-      success: result.success,
-      data: result
-    });
+		const amazonService = new AmazonService();
+		const result = await amazonService.triggerReviewRequest(orderId);
 
-  } catch (error: any) {
-    const duration = Date.now() - startTime;
-    
-    logger.error('Review request trigger failed', {
-      endpoint: '/api/orders/trigger-review',
-      duration,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+		const duration = Date.now() - startTime;
 
-    return json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 });
-  }
+		logger.info('Review request triggered', {
+			endpoint: '/api/orders/trigger-review',
+			duration,
+			orderId,
+			success: result.success,
+			status: result.status,
+			error: result.error
+		});
+
+		return json({
+			success: result.success,
+			data: result
+		});
+	} catch (error: any) {
+		const duration = Date.now() - startTime;
+
+		logger.error('Review request trigger failed', {
+			endpoint: '/api/orders/trigger-review',
+			duration,
+			error: error instanceof Error ? error.message : 'Unknown error'
+		});
+
+		return json(
+			{
+				success: false,
+				error: error instanceof Error ? error.message : 'Unknown error'
+			},
+			{ status: 500 }
+		);
+	}
 };

@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "idx_reimbursed_items_reimbursement_id_unique" ON "reimbursed_items" USING btree ("reimbursement_id");--> statement-breakpoint
+ALTER TABLE "customer_returns" ADD CONSTRAINT "idx_customer_returns_order_fnsku_date_unique" UNIQUE("order_id","fnsku","return_date");
