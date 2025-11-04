@@ -2,6 +2,8 @@
 
 A fullstack application built with SvelteKit and PostgreSQL that automatically sends review requests for Amazon orders, following Amazon's policies and best practices.
 
+> **Quick Links**: [Setup](#-quick-start) | [API Endpoints](#-api-endpoints) | [Troubleshooting](#-troubleshooting)
+
 ## 🚀 Features
 
 ### Core Functionality
