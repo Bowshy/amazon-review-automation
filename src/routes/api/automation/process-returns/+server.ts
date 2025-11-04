@@ -4,71 +4,76 @@ import { AmazonService } from '$lib/db/services/amazon';
 import { logger } from '$lib/logger';
 
 export const POST: RequestHandler = async ({ request }) => {
-  const startTime = Date.now();
-  
-  try {
-    const body = await request.json();
-    const { dataStartTime, dataEndTime } = body;
+	const startTime = Date.now();
 
-    // Validate input parameters
-    if (!dataStartTime || !dataEndTime) {
-      return json({ 
-        success: false, 
-        error: 'dataStartTime and dataEndTime are required' 
-      }, { status: 400 });
-    }
+	try {
+		const body = await request.json();
+		const { dataStartTime, dataEndTime } = body;
 
-    logger.info('Starting returns report processing', {
-      endpoint: '/api/automation/process-returns',
-      method: 'POST',
-      dataStartTime,
-      dataEndTime
-    });
+		// Validate input parameters
+		if (!dataStartTime || !dataEndTime) {
+			return json(
+				{
+					success: false,
+					error: 'dataStartTime and dataEndTime are required'
+				},
+				{ status: 400 }
+			);
+		}
 
-    // Initialize Amazon service
-    const amazonService = new AmazonService();
+		logger.info('Starting returns report processing', {
+			endpoint: '/api/automation/process-returns',
+			method: 'POST',
+			dataStartTime,
+			dataEndTime
+		});
 
-    // Process returns report
-    const result = await amazonService.processReturnsReport(
-      new Date(dataStartTime),
-      new Date(dataEndTime)
-    );
+		// Initialize Amazon service
+		const amazonService = new AmazonService();
 
-    const duration = Date.now() - startTime;
-    
-    logger.info('Returns report processing completed', {
-      endpoint: '/api/automation/process-returns',
-      duration,
-      success: result.success,
-      reportId: result.reportId,
-      processedReturns: result.processedReturns,
-      updatedOrders: result.updatedOrders,
-      errors: result.errors
-    });
+		// Process returns report
+		const result = await amazonService.processReturnsReport(
+			new Date(dataStartTime),
+			new Date(dataEndTime)
+		);
 
-    return json({
-      success: result.success,
-      reportId: result.reportId,
-      processedReturns: result.processedReturns,
-      updatedOrders: result.updatedOrders,
-      errors: result.errors,
-      message: `Returns processing completed. Processed: ${result.processedReturns}, Updated orders: ${result.updatedOrders}, Errors: ${result.errors}`
-    });
+		const duration = Date.now() - startTime;
 
-  } catch (error: any) {
-    const duration = Date.now() - startTime;
-    
-    logger.error('Returns report processing failed', {
-      error: { message: error.message, stack_trace: error.stack },
-      endpoint: '/api/automation/process-returns',
-      method: 'POST',
-      duration,
-      userAgent: request.headers.get('user-agent')
-    });
-    
-    return json({ 
-      success: false, 
-      error: error.message || 'Internal server error' 
-    }, { status: 500 });
-  }
+		logger.info('Returns report processing completed', {
+			endpoint: '/api/automation/process-returns',
+			duration,
+			success: result.success,
+			reportId: result.reportId,
+			processedReturns: result.processedReturns,
+			updatedOrders: result.updatedOrders,
+			errors: result.errors
+		});
+
+		return json({
+			success: result.success,
+			reportId: result.reportId,
+			processedReturns: result.processedReturns,
+			updatedOrders: result.updatedOrders,
+			errors: result.errors,
+			message: `Returns processing completed. Processed: ${result.processedReturns}, Updated orders: ${result.updatedOrders}, Errors: ${result.errors}`
+		});
+	} catch (error: any) {
+		const duration = Date.now() - startTime;
+
+		logger.error('Returns report processing failed', {
+			error: { message: error.message, stack_trace: error.stack },
+			endpoint: '/api/automation/process-returns',
+			method: 'POST',
+			duration,
+			userAgent: request.headers.get('user-agent')
+		});
+
+		return json(
+			{
+				success: false,
+				error: error.message || 'Internal server error'
+			},
+			{ status: 500 }
+		);
+	}
 };

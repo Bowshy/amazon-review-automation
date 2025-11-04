@@ -5,6 +5,7 @@ A fullstack application built with SvelteKit and PostgreSQL that automatically s
 ## 🚀 Features
 
 ### Core Functionality
+
 - **Automated Review Requests**: Sends review requests exactly 25 days after delivery
 - **Manual Review Triggers**: Check and trigger review requests for specific orders
 - **Solicitation Actions**: Verify order eligibility for review requests
@@ -13,12 +14,14 @@ A fullstack application built with SvelteKit and PostgreSQL that automatically s
 - **Activity Tracking**: Comprehensive logging of all actions and decisions
 
 ### Dashboard & Analytics
+
 - **Real-time Statistics**: Overview of total orders, eligible orders, and request status
 - **Order Management**: View, filter, and search through all orders
 - **Review Request Tracking**: Monitor the status of all review requests
 - **Activity Logs**: Detailed audit trail of all system actions
 
 ### Safety & Reliability
+
 - **Error Handling**: Robust error handling with retry mechanisms
 - **Rate Limiting**: Respects Amazon API rate limits
 - **Data Validation**: Ensures data integrity and policy compliance
@@ -28,7 +31,7 @@ A fullstack application built with SvelteKit and PostgreSQL that automatically s
 
 - **Frontend**: SvelteKit with TypeScript
 - **Styling**: Tailwind CSS
-- **Database**: PostgreSQL with Prisma ORM
+- **Database**: PostgreSQL with Drizzle ORM
 - **API Integration**: Amazon Selling Partner API
 - **Deployment**: Vercel/Netlify ready
 
@@ -76,19 +79,25 @@ AMAZON_MARKETPLACE_ID=your_marketplace_id
 ### 3. Database Setup
 
 1. Set up a PostgreSQL database (local or cloud)
-2. Run the database setup script:
+2. Run the database migrations:
 
 ```bash
-chmod +x scripts/setup-database.sh
-./scripts/setup-database.sh
+npm run db:setup
 ```
 
 This will:
-- Check database connectivity
-- Generate Prisma client
-- Push database schema
-- Seed with sample data
-- Verify setup
+
+- Generate Drizzle migrations from schema changes
+- Run database migrations
+- Initialize database schema
+
+Or use individual commands:
+
+```bash
+npm run db:generate  # Generate migrations
+npm run db:migrate   # Apply migrations
+npm run db:push      # Push schema directly (for development)
+```
 
 ### 4. Development
 
@@ -129,14 +138,14 @@ Visit `http://localhost:5173` to see the application.
 
 1. **Set up PostgreSQL**: Use a local or cloud PostgreSQL database
 2. **Configure Environment**: Set the database connection variables in your `.env` file
-3. **Run Setup**: Use the provided setup script to initialize the database
-4. **Verify Connection**: The setup script will verify connectivity and schema
+3. **Run Migrations**: Use `npm run db:setup` to initialize the database
+4. **Verify Connection**: Test your connection by running the application
 
 ## 🎯 How It Works
 
 ### Daily Automation Process
 
-1. **Order Eligibility Check**: 
+1. **Order Eligibility Check**:
    - Finds orders delivered 25+ days ago
    - Excludes returned orders
    - Excludes orders with existing review requests
@@ -153,7 +162,7 @@ Visit `http://localhost:5173` to see the application.
 
 ### Review Request Logic
 
-- **Timing**: Exactly 25 days after delivery (within Amazon's 5-30 day window) 
+- **Timing**: Exactly 25 days after delivery (within Amazon's 5-30 day window)
 - **Eligibility**: Only for delivered, non-returned orders
 - **Frequency**: One request per order maximum
 - **Retry Logic**: Up to 3 retry attempts for failed requests
@@ -161,6 +170,7 @@ Visit `http://localhost:5173` to see the application.
 ## 📈 Dashboard Features
 
 ### Statistics Overview
+
 - Total orders in system
 - Orders eligible for review requests
 - Successfully sent requests
@@ -168,12 +178,14 @@ Visit `http://localhost:5173` to see the application.
 - Returned orders (excluded from requests)
 
 ### Recent Activity
+
 - Today's review requests
 - Weekly and monthly summaries
 - Failed request retry attempts
 - System automation runs
 
 ### Order Management
+
 - Search and filter orders
 - View detailed order information
 - Track review request status
@@ -182,12 +194,14 @@ Visit `http://localhost:5173` to see the application.
 ## 🔒 Security & Compliance
 
 ### Amazon Policy Compliance
+
 - Respects 5-30 day review request window
 - Uses official Amazon SP API
 - Follows rate limiting guidelines
 - Implements proper error handling
 
 ### Data Security
+
 - Row Level Security (RLS) enabled
 - Encrypted API credentials
 - Audit trail for all actions
@@ -273,6 +287,7 @@ For support and questions:
 ## 🔄 Changelog
 
 ### v1.0.0
+
 - Initial release
 - Core automation functionality
 - Dashboard and analytics
