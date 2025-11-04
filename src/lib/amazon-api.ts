@@ -7,6 +7,7 @@ import type {
 	InventoryLedgerEventData
 } from './types';
 import { logger } from './logger';
+import { env } from '$env/dynamic/private';
 
 export class AmazonSPAPI {
 	private client: SellingPartner;
@@ -35,7 +36,7 @@ export class AmazonSPAPI {
 				auto_request_throttled: true,
 				version_fallback: true,
 				use_sandbox: config.isTest || false,
-				debug_log: process.env.NODE_ENV === 'development'
+				debug_log: env.NODE_ENV === 'development'
 			}
 		});
 	}
@@ -723,7 +724,7 @@ export class AmazonSPAPI {
 					auto_request_throttled: true,
 					version_fallback: true,
 					use_sandbox: this.config.isTest || false,
-					debug_log: process.env.NODE_ENV === 'development'
+					debug_log: env.NODE_ENV === 'development'
 				}
 			});
 		}

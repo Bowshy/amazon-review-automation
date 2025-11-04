@@ -1,7 +1,8 @@
 import winston from 'winston';
 import { ecsFormat } from '@elastic/ecs-winston-format';
+import { env } from '$env/dynamic/private';
 
-const isProduction = process.env.NODE_ENV === 'production';
+const isProduction = env.NODE_ENV === 'production';
 
 // Custom format for console output (keeping the existing format for development)
 const consoleFormat = winston.format.combine(
@@ -28,9 +29,9 @@ const logger = winston.createLogger({
 		apmIntegration: true,
 		// Service information
 		serviceName: 'amazon-review-automation',
-		serviceVersion: process.env.npm_package_version || '0.0.1',
-		serviceEnvironment: process.env.NODE_ENV || 'development',
-		serviceNodeName: process.env.HOSTNAME || 'localhost',
+		serviceVersion: env.npm_package_version || '0.0.1',
+		serviceEnvironment: env.NODE_ENV || 'development',
+		serviceNodeName: env.HOSTNAME || 'localhost',
 		// Event dataset for correlation in Kibana
 		eventDataset: 'amazon-review-automation'
 	}),

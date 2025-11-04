@@ -1,7 +1,4 @@
-import { config as dotenvConfig } from 'dotenv';
-
-// Load environment variables from .env file (same approach as database config)
-dotenvConfig();
+import { env } from '$env/dynamic/private';
 
 export interface AmazonConfig {
 	clientId: string;
@@ -12,10 +9,10 @@ export interface AmazonConfig {
 
 export function getAmazonConfig(): AmazonConfig {
 	return {
-		clientId: process.env.AMAZON_CLIENT_ID || '',
-		clientSecret: process.env.AMAZON_CLIENT_SECRET || '',
-		refreshToken: process.env.AMAZON_REFRESH_TOKEN || '',
-		marketplaceId: process.env.AMAZON_MARKETPLACE_ID || ''
+		clientId: env.AMAZON_CLIENT_ID || '',
+		clientSecret: env.AMAZON_CLIENT_SECRET || '',
+		refreshToken: env.AMAZON_REFRESH_TOKEN || '',
+		marketplaceId: env.AMAZON_MARKETPLACE_ID || ''
 	};
 }
 

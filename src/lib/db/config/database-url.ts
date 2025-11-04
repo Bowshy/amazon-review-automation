@@ -1,13 +1,10 @@
-import { config } from 'dotenv';
+import { env } from '$env/dynamic/private';
 
-// Load environment variables
-config();
-
-const DB_HOST = process.env.DB_HOST || '';
-const DB_PORT = process.env.DB_PORT || '5432';
-const DB_USERNAME = process.env.DB_USERNAME || '';
-const DB_PASSWORD = process.env.DB_PASSWORD || '';
-const DB_NAME = process.env.DB_NAME || '';
+const DB_HOST = env.DB_HOST || '';
+const DB_PORT = env.DB_PORT || '5432';
+const DB_USERNAME = env.DB_USERNAME || '';
+const DB_PASSWORD = env.DB_PASSWORD || '';
+const DB_NAME = env.DB_NAME || '';
 
 export function getDatabaseUrl(): string {
 	// Check if we're using Supabase (indicated by supabase.co in host)
